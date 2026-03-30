@@ -414,6 +414,35 @@ async def root():
         }
     }
 
+@app.get("/.well-known/x402")
+async def x402_manifest():
+    """x402 service discovery manifest."""
+    return {
+        "x402Version": 2,
+        "name": "KR Crypto Intelligence",
+        "description": "Korean crypto market data for AI agents. Real-time Kimchi Premium, Upbit/Bithumb prices, USD/KRW FX rate.",
+        "url": "https://api.printmoneylab.com",
+        "mcp": "https://mcp.printmoneylab.com/sse",
+        "source": "https://github.com/bakyang2/kr-crypto-intelligence",
+        "endpoints": [
+            {"path": "/api/v1/kimchi-premium", "method": "GET", "price": "$0.001", "network": "eip155:8453", "description": "Real-time Kimchi Premium (Upbit vs Binance)"},
+            {"path": "/api/v1/kr-prices", "method": "GET", "price": "$0.001", "network": "eip155:8453", "description": "Korean exchange prices (Upbit, Bithumb)"},
+            {"path": "/api/v1/fx-rate", "method": "GET", "price": "$0.001", "network": "eip155:8453", "description": "USD/KRW exchange rate"}
+        ],
+        "free_endpoints": [
+            {"path": "/api/v1/symbols", "method": "GET", "description": "Available trading symbols"},
+            {"path": "/health", "method": "GET", "description": "Service health check"},
+            {"path": "/api/v1/stats", "method": "GET", "description": "API usage statistics"}
+        ],
+        "payment": {
+            "scheme": "exact",
+            "network": "eip155:8453",
+            "asset": "USDC",
+            "payTo": "0xcF9223eCe895258dEa8D288AEBcf846Ab8E342fB"
+        },
+        "tags": ["korean", "crypto", "kimchi-premium", "upbit", "bithumb", "fx-rate", "market-data", "asia"]
+    }
+
 @app.get("/health")
 async def health():
     exchanges = await check_exchange_health()
