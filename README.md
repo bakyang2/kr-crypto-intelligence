@@ -9,6 +9,7 @@ Korean crypto market data for AI agents. Pay-per-use via x402 protocol on Base.
 | `/api/v1/kimchi-premium` | Real-time Kimchi Premium (Upbit vs Binance) | $0.001 USDC |
 | `/api/v1/kr-prices` | Korean exchange prices (Upbit, Bithumb) | $0.001 USDC |
 | `/api/v1/fx-rate` | USD/KRW exchange rate | $0.001 USDC |
+| `/api/v1/stablecoin-premium` | USDT/USDC premium on Korean exchanges (fund flow indicator) | $0.001 USDC |
 | `/api/v1/symbols` | Available trading symbols | Free |
 | `/api/v1/stats` | API usage statistics | Free |
 | `/health` | Service health check | Free |
@@ -20,6 +21,9 @@ Korean crypto market data for AI agents. Pay-per-use via x402 protocol on Base.
 **Health Check:** [https://api.printmoneylab.com/health](https://api.printmoneylab.com/health)
 
 **API Docs:** [https://api.printmoneylab.com/docs](https://api.printmoneylab.com/docs)
+
+## What is Stablecoin Premium?
+The Stablecoin Premium tracks the price difference between USDT/USDC on Korean exchanges vs the official USD/KRW rate. A positive premium indicates capital flowing INTO the Korean crypto market. A negative premium signals capital outflow. This is a separate indicator from the Kimchi Premium and provides insight into Korean market fund flow direction.
 
 ## What is Kimchi Premium?
 

@@ -50,6 +50,18 @@ async def get_available_symbols() -> dict:
         r = await client.get(f"{API_BASE}/api/v1/symbols")
         return r.json()
 
+
+@mcp.tool()
+async def get_stablecoin_premium() -> dict:
+    """Get USDT and USDC premium on Korean exchanges vs official USD/KRW rate.
+    Positive premium = capital flowing INTO Korean crypto market.
+    Negative premium = capital flowing OUT.
+    This is a key indicator of Korean market fund flow direction, separate from Kimchi Premium.
+    """
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(f"{API_BASE}/api/v1/stablecoin-premium")
+        return r.json()
+
 @mcp.tool()
 async def check_health() -> dict:
     """Check service health and exchange connectivity status.
