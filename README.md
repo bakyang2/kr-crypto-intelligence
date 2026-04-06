@@ -31,7 +31,7 @@ The Kimchi Premium is the price difference between Korean crypto exchanges (Upbi
 
 ## Payment
 
-Uses the [x402 protocol](https://x402.org) for micropayments. AI agents pay $0.001 USDC per request on Base network. No API key, no subscription, no signup required.
+Uses the [x402 protocol](https://x402.org) for micropayments. AI agents pay $0.001 USDC per request on Base or Solana network. No API key, no subscription, no signup required.
 
 ## Data Sources
 
@@ -43,7 +43,7 @@ Uses the [x402 protocol](https://x402.org) for micropayments. AI agents pay $0.0
 ## Tech Stack
 
 - Python / FastAPI
-- x402 Payment Protocol (Base mainnet USDC)
+- x402 Payment Protocol (Base mainnet + Solana mainnet USDC)
 - Cloudflare SSL
 - Oracle Cloud ARM (Always Free Tier)
 

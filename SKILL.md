@@ -11,7 +11,7 @@ Korean crypto market data API for AI agents. South Korea ranks top 3 globally in
 
 ## Endpoints
 
-All endpoints at `https://api.printmoneylab.com`, paid via x402 ($0.001 USDC on Base).
+All endpoints at `https://api.printmoneylab.com`, paid via x402 ($0.001 USDC on Base or Solana).
 
 | Endpoint | Description |
 |----------|-------------|

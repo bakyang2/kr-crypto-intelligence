@@ -13,9 +13,11 @@ from fastapi.responses import JSONResponse
 # === x402 결제 ===
 from x402.http.middleware.fastapi import PaymentMiddlewareASGI
 from x402.http import HTTPFacilitatorClient, FacilitatorConfig, PaymentOption
+from cdp.x402 import create_facilitator_config
 from x402.http.types import RouteConfig
 from x402.server import x402ResourceServer
 from x402.mechanisms.evm.exact import ExactEvmServerScheme
+from x402.mechanisms.svm.exact import ExactSvmServerScheme
 
 # === 설정 ===
 CACHE_TTL = 15
@@ -352,22 +354,41 @@ async def lifespan(app):
 
 # === x402 결제 설정 ===
 WALLET_ADDRESS = "0xcF9223eCe895258dEa8D288AEBcf846Ab8E342fB"
-FACILITATOR_URL = "https://facilitator.xpay.sh"
+SOLANA_WALLET = "3Ywxk31SvWKwZBdY6bLvjmn5h4mzWcT3HJ5UZbYXoVy9"
+SOLANA_NETWORK = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" 
+FACILITATOR_URL = "https://api.cdp.coinbase.com/platform/v2/x402"
 
+cdp_config = create_facilitator_config()
 x402_server = x402ResourceServer(
-    HTTPFacilitatorClient(FacilitatorConfig(url=FACILITATOR_URL))
+    HTTPFacilitatorClient(cdp_config)
 )
 x402_server.register("eip155:8453", ExactEvmServerScheme())
+x402_server.register("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", ExactSvmServerScheme())
 
 x402_routes = {
     "GET /api/v1/kimchi-premium": RouteConfig(
-        accepts=[PaymentOption(scheme="exact", price="$0.001", network="eip155:8453", pay_to=WALLET_ADDRESS)]
+        accepts=[
+            PaymentOption(scheme="exact", price="$0.001", network="eip155:8453", pay_to=WALLET_ADDRESS),
+            PaymentOption(scheme="exact", price="$0.001", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
+        ]
     ),
     "GET /api/v1/kr-prices": RouteConfig(
-        accepts=[PaymentOption(scheme="exact", price="$0.001", network="eip155:8453", pay_to=WALLET_ADDRESS)]
+        accepts=[
+            PaymentOption(scheme="exact", price="$0.001", network="eip155:8453", pay_to=WALLET_ADDRESS),
+            PaymentOption(scheme="exact", price="$0.001", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
+        ]
     ),
     "GET /api/v1/fx-rate": RouteConfig(
-        accepts=[PaymentOption(scheme="exact", price="$0.001", network="eip155:8453", pay_to=WALLET_ADDRESS)]
+        accepts=[
+            PaymentOption(scheme="exact", price="$0.001", network="eip155:8453", pay_to=WALLET_ADDRESS),
+            PaymentOption(scheme="exact", price="$0.001", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
+        ]
+    ),
+    "GET /api/v1/stablecoin-premium": RouteConfig(
+        accepts=[
+            PaymentOption(scheme="exact", price="$0.001", network="eip155:8453", pay_to=WALLET_ADDRESS),
+            PaymentOption(scheme="exact", price="$0.001", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
+        ]
     ),
 }
 
@@ -391,8 +412,9 @@ async def rate_limit_middleware(request: Request, call_next):
     response = await call_next(request)
     try:
         endpoint = request.url.path
-        symbol = request.query_params.get("symbol", "")
-        await tg_notify_request(endpoint, symbol, ip, response.status_code)
+        if endpoint.startswith("/api/v1/"):
+            symbol = request.query_params.get("symbol", "")
+            await tg_notify_request(endpoint, symbol, ip, response.status_code)
     except Exception:
         pass
     return response
@@ -425,21 +447,20 @@ async def x402_manifest():
         "mcp": "https://mcp.printmoneylab.com/sse",
         "source": "https://github.com/bakyang2/kr-crypto-intelligence",
         "endpoints": [
-            {"path": "/api/v1/kimchi-premium", "method": "GET", "price": "$0.001", "network": "eip155:8453", "description": "Real-time Kimchi Premium (Upbit vs Binance)"},
-            {"path": "/api/v1/kr-prices", "method": "GET", "price": "$0.001", "network": "eip155:8453", "description": "Korean exchange prices (Upbit, Bithumb)"},
-            {"path": "/api/v1/fx-rate", "method": "GET", "price": "$0.001", "network": "eip155:8453", "description": "USD/KRW exchange rate"}
+            {"path": "/api/v1/kimchi-premium", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Real-time Kimchi Premium (Upbit vs Binance)"},
+            {"path": "/api/v1/kr-prices", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean exchange prices (Upbit, Bithumb)"},
+            {"path": "/api/v1/fx-rate", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "USD/KRW exchange rate"},
+            {"path": "/api/v1/stablecoin-premium", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "USDT/USDC premium on Korean exchanges (fund flow indicator)"}
         ],
         "free_endpoints": [
             {"path": "/api/v1/symbols", "method": "GET", "description": "Available trading symbols"},
             {"path": "/health", "method": "GET", "description": "Service health check"},
             {"path": "/api/v1/stats", "method": "GET", "description": "API usage statistics"}
         ],
-        "payment": {
-            "scheme": "exact",
-            "network": "eip155:8453",
-            "asset": "USDC",
-            "payTo": "0xcF9223eCe895258dEa8D288AEBcf846Ab8E342fB"
-        },
+        "payment": [
+            {"scheme": "exact", "network": "eip155:8453", "asset": "USDC", "payTo": "0xcF9223eCe895258dEa8D288AEBcf846Ab8E342fB"},
+            {"scheme": "exact", "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "asset": "USDC", "payTo": "3Ywxk31SvWKwZBdY6bLvjmn5h4mzWcT3HJ5UZbYXoVy9"}
+        ],
         "tags": ["korean", "crypto", "kimchi-premium", "upbit", "bithumb", "fx-rate", "market-data", "asia"]
     }
 
@@ -498,6 +519,47 @@ async def kimchi_premium(symbol: str = Query(default="BTC", description="Crypto 
         if fx["source"] == "estimated_from_crypto":
             result["warning"] = "FX rate estimated from crypto prices. Premium calculation may be less accurate."
         return result
+    except HTTPException:
+        stats["errors"] += 1
+        raise
+    except Exception as e:
+        stats["errors"] += 1
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/stablecoin-premium")
+async def stablecoin_premium():
+    track_request("stablecoin-premium")
+    try:
+        fx = await fetch_fx_rate()
+        official_rate = fx["rate"]
+        results = {}
+        for coin in ["USDT", "USDC"]:
+            try:
+                upbit = await fetch_upbit_price(coin)
+                if "error" in upbit:
+                    results[coin.lower()] = {"error": upbit["error"]}
+                    continue
+                price_krw = upbit["price_krw"]
+                premium_pct = ((price_krw - official_rate) / official_rate) * 100
+                results[coin.lower()] = {
+                    "price_krw": price_krw,
+                    "premium_percent": round(premium_pct, 2),
+                    "premium_direction": "positive" if premium_pct > 0 else "negative",
+                    "volume_24h": upbit.get("volume_24h"),
+                }
+            except Exception as e:
+                results[coin.lower()] = {"error": str(e)}
+        return {
+            "official_fx_rate": official_rate,
+            "fx_source": fx["source"],
+            "stablecoins": results,
+            "interpretation": {
+                "positive_premium": "Capital flowing INTO Korean crypto market",
+                "negative_premium": "Capital flowing OUT of Korean crypto market",
+            },
+            "timestamp": int(time.time() * 1000),
+        }
     except HTTPException:
         stats["errors"] += 1
         raise
