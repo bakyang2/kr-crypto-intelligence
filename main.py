@@ -444,7 +444,7 @@ async def x402_manifest():
         "name": "KR Crypto Intelligence",
         "description": "Korean crypto market data for AI agents. Real-time Kimchi Premium, Upbit/Bithumb prices, USD/KRW FX rate.",
         "url": "https://api.printmoneylab.com",
-        "mcp": "https://mcp.printmoneylab.com/sse",
+        "mcp": "https://mcp.printmoneylab.com/mcp",
         "source": "https://github.com/bakyang2/kr-crypto-intelligence",
         "endpoints": [
             {"path": "/api/v1/kimchi-premium", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Real-time Kimchi Premium (Upbit vs Binance)"},
@@ -619,4 +619,4 @@ async def get_stats():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=80)
+    uvicorn.run(app, host="0.0.0.0", port=8080)
