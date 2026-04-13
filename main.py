@@ -13,6 +13,8 @@ from fastapi.responses import JSONResponse
 # === x402 결제 ===
 from x402.http.middleware.fastapi import PaymentMiddlewareASGI
 from x402.http import HTTPFacilitatorClient, FacilitatorConfig, PaymentOption
+import anthropic
+import asyncio
 from cdp.x402 import create_facilitator_config
 from x402.http.types import RouteConfig
 from x402.server import x402ResourceServer
@@ -390,6 +392,12 @@ x402_routes = {
             PaymentOption(scheme="exact", price="$0.001", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
         ]
     ),
+    "GET /api/v1/market-read": RouteConfig(
+        accepts=[
+            PaymentOption(scheme="exact", price="$0.1", network="eip155:8453", pay_to=WALLET_ADDRESS),
+            PaymentOption(scheme="exact", price="$0.1", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
+        ]
+    ),
 }
 
 app = FastAPI(
@@ -450,7 +458,8 @@ async def x402_manifest():
             {"path": "/api/v1/kimchi-premium", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Real-time Kimchi Premium (Upbit vs Binance)"},
             {"path": "/api/v1/kr-prices", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean exchange prices (Upbit, Bithumb)"},
             {"path": "/api/v1/fx-rate", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "USD/KRW exchange rate"},
-            {"path": "/api/v1/stablecoin-premium", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "USDT/USDC premium on Korean exchanges (fund flow indicator)"}
+            {"path": "/api/v1/stablecoin-premium", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "USDT/USDC premium on Korean exchanges (fund flow indicator)"},
+            {"path": "/api/v1/market-read", "method": "GET", "price": "$0.10", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "AI-powered Korean crypto market analysis with signal, confidence, and actionable summary"}
         ],
         "free_endpoints": [
             {"path": "/api/v1/symbols", "method": "GET", "description": "Available trading symbols"},
@@ -620,3 +629,289 @@ async def get_stats():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8080)
+
+
+# ============================================================
+# Market Read - AI-powered Korean crypto market analysis
+# ============================================================
+
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+
+async def fetch_upbit_volume_top(limit=5):
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get("https://api.upbit.com/v1/ticker/all?quote_currencies=KRW")
+            if r.status_code != 200:
+                return []
+            tickers = r.json()
+            sorted_t = sorted(tickers, key=lambda x: float(x.get("acc_trade_price_24h", 0)), reverse=True)
+            result = []
+            for t in sorted_t[:limit]:
+                sym = t["market"].replace("KRW-", "")
+                change_rate = float(t.get("signed_change_rate", 0)) * 100
+                volume_krw = float(t.get("acc_trade_price_24h", 0))
+                result.append({
+                    "symbol": sym,
+                    "change_24h_pct": round(change_rate, 2),
+                    "volume_krw_billion": round(volume_krw / 1e9, 1),
+                    "price_krw": float(t.get("trade_price", 0)),
+                })
+            return result
+    except Exception as e:
+        print(f"[WARN] upbit volume top: {e}")
+        return []
+
+async def fetch_bithumb_volume_top(limit=5):
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get("https://api.bithumb.com/public/ticker/ALL_KRW")
+            if r.status_code != 200:
+                return []
+            data = r.json().get("data", {})
+            tickers = []
+            for sym, info in data.items():
+                if sym == "date" or not isinstance(info, dict):
+                    continue
+                try:
+                    vol = float(info.get("acc_trade_value_24H", 0))
+                    price = float(info.get("closing_price", 0))
+                    change = float(info.get("fluctate_rate_24H", 0))
+                    tickers.append({
+                        "symbol": sym,
+                        "volume_krw_billion": round(vol / 1e9, 1),
+                        "price_krw": price,
+                        "change_24h_pct": round(change, 2),
+                    })
+                except (ValueError, TypeError):
+                    continue
+            sorted_t = sorted(tickers, key=lambda x: x["volume_krw_billion"], reverse=True)
+            return sorted_t[:limit]
+    except Exception as e:
+        print(f"[WARN] bithumb volume top: {e}")
+        return []
+
+async def fetch_binance_funding_rate():
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get("https://fapi.binance.com/fapi/v1/premiumIndex", params={"symbol": "BTCUSDT"})
+            if r.status_code != 200:
+                return None
+            data = r.json()
+            rate = float(data.get("lastFundingRate", 0)) * 100
+            return {
+                "funding_rate_pct": round(rate, 4),
+                "mark_price": round(float(data.get("markPrice", 0)), 2),
+                "interpretation": "longs_pay" if rate > 0 else "shorts_pay" if rate < 0 else "neutral",
+            }
+    except Exception as e:
+        print(f"[WARN] funding rate: {e}")
+        return None
+
+async def fetch_binance_open_interest():
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get("https://fapi.binance.com/fapi/v1/openInterest", params={"symbol": "BTCUSDT"})
+            if r.status_code != 200:
+                return None
+            oi_btc = float(r.json().get("openInterest", 0))
+            r2 = await client.get("https://fapi.binance.com/fapi/v1/premiumIndex", params={"symbol": "BTCUSDT"})
+            mark = float(r2.json().get("markPrice", 0)) if r2.status_code == 200 else 0
+            oi_usd = oi_btc * mark
+            return {
+                "open_interest_btc": round(oi_btc, 2),
+                "open_interest_usd_billion": round(oi_usd / 1e9, 2),
+            }
+    except Exception as e:
+        print(f"[WARN] open interest: {e}")
+        return None
+
+async def fetch_btc_dominance():
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get("https://api.coingecko.com/api/v3/global")
+            if r.status_code != 200:
+                return None
+            pct = r.json()["data"]["market_cap_percentage"]
+            btc = pct.get("btc", 0)
+            eth = pct.get("eth", 0)
+            return {
+                "btc_dominance_pct": round(btc, 1),
+                "eth_dominance_pct": round(eth, 1),
+                "alt_dominance_pct": round(100 - btc - eth, 1),
+            }
+    except Exception as e:
+        print(f"[WARN] dominance: {e}")
+        return None
+
+async def fetch_fear_greed():
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get("https://api.alternative.me/fng/?limit=1")
+            if r.status_code != 200:
+                return None
+            data = r.json()["data"][0]
+            return {
+                "value": int(data["value"]),
+                "label": data["value_classification"],
+            }
+    except Exception as e:
+        print(f"[WARN] fear greed: {e}")
+        return None
+
+async def kimchi_premium_data(symbol="BTC"):
+    try:
+        upbit = await fetch_upbit_price(symbol)
+        binance = await fetch_binance_price(symbol)
+        fx = await fetch_fx_rate()
+        if not all([upbit, binance, fx]):
+            return None
+        upbit_krw = upbit["price_krw"]
+        binance_krw = binance["price_usdt"] * fx["rate"]
+        premium = ((upbit_krw - binance_krw) / binance_krw) * 100
+        return {
+            "symbol": symbol,
+            "premium_pct": round(premium, 2),
+            "upbit_krw": upbit_krw,
+            "binance_usd": binance["price_usdt"],
+            "direction": "positive" if premium > 0 else "negative",
+        }
+    except Exception as e:
+        print(f"[WARN] kimchi premium data: {e}")
+        return None
+
+async def stablecoin_premium_data():
+    try:
+        fx = await fetch_fx_rate()
+        if not fx:
+            return None
+        official_rate = fx["rate"]
+        result = {}
+        async with httpx.AsyncClient(timeout=10) as client:
+            for stable in ["USDT", "USDC"]:
+                r = await client.get(f"https://api.upbit.com/v1/ticker?markets=KRW-{stable}")
+                if r.status_code == 200:
+                    data = r.json()
+                    if data:
+                        krw_price = float(data[0]["trade_price"])
+                        premium = ((krw_price - official_rate) / official_rate) * 100
+                        result[stable.lower()] = {
+                            "krw_price": krw_price,
+                            "premium_pct": round(premium, 2),
+                        }
+        if result:
+            avg = sum(v["premium_pct"] for v in result.values()) / len(result)
+            result["direction"] = "inflow" if avg > 0 else "outflow"
+            result["avg_premium_pct"] = round(avg, 2)
+        return result if result else None
+    except Exception as e:
+        print(f"[WARN] stablecoin premium data: {e}")
+        return None
+
+def call_claude_sync(market_data):
+    prompt = f"""You are a senior Korean crypto market analyst providing actionable intelligence to AI trading agents.
+
+Analyze this real-time data and provide a structured market read:
+
+{json.dumps(market_data, indent=2, ensure_ascii=False)}
+
+Rules:
+- Be specific. Reference actual numbers from the data.
+- The summary should be 2-3 sentences of actionable insight.
+- Confidence is 1-10 based on how aligned the signals are.
+- key_factors should list the 3 most important data points driving your signal.
+
+Respond ONLY with this JSON (no markdown, no backticks):
+{{"signal":"BULLISH or BEARISH or NEUTRAL","confidence":7,"summary":"Your analysis here.","key_factors":["factor1","factor2","factor3"],"risk_warning":"Main risk to watch."}}"""
+
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=500,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        text = message.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+            text = text.strip()
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        print(f"[ERR] Claude JSON parse: {e}")
+        return {"signal": "NEUTRAL", "confidence": 0, "summary": "AI parsing error. Raw data included.", "key_factors": [], "risk_warning": "Interpret raw data manually."}
+    except Exception as e:
+        print(f"[ERR] Claude API: {e}")
+        return {"signal": "ERROR", "confidence": 0, "summary": f"AI error: {str(e)[:100]}", "key_factors": [], "risk_warning": "Service temporarily unavailable."}
+
+
+@app.get("/api/v1/market-read")
+async def market_read(request: Request):
+    """AI-powered Korean crypto market analysis."""
+    import time as _time
+    start = _time.time()
+    ip = get_real_ip(request)
+
+    try:
+        results = await asyncio.gather(
+            kimchi_premium_data("BTC"),
+            stablecoin_premium_data(),
+            fetch_fx_rate(),
+            fetch_upbit_volume_top(5),
+            fetch_bithumb_volume_top(5),
+            fetch_binance_funding_rate(),
+            fetch_binance_open_interest(),
+            fetch_btc_dominance(),
+            fetch_fear_greed(),
+            return_exceptions=True,
+        )
+
+        def safe(r):
+            return r if not isinstance(r, Exception) else None
+
+        market_data = {
+            "korean_market": {
+                "kimchi_premium": safe(results[0]),
+                "stablecoin_premium": safe(results[1]),
+                "fx_rate": safe(results[2]),
+                "upbit_volume_top5": safe(results[3]) or [],
+                "bithumb_volume_top5": safe(results[4]) or [],
+            },
+            "global_market": {
+                "btc_funding_rate": safe(results[5]),
+                "btc_open_interest": safe(results[6]),
+                "dominance": safe(results[7]),
+                "fear_greed_index": safe(results[8]),
+            },
+        }
+
+        loop = asyncio.get_event_loop()
+        ai_analysis = await loop.run_in_executor(None, call_claude_sync, market_data)
+
+        elapsed = round(_time.time() - start, 2)
+
+        response = {
+            "signal": ai_analysis.get("signal", "NEUTRAL"),
+            "confidence": f'{ai_analysis.get("confidence", 0)}/10',
+            "summary": ai_analysis.get("summary", ""),
+            "key_factors": ai_analysis.get("key_factors", []),
+            "risk_warning": ai_analysis.get("risk_warning", ""),
+            "data": market_data,
+            "meta": {
+                "price": "$0.10",
+                "processing_time_sec": elapsed,
+                "data_sources": ["upbit", "bithumb", "binance_futures", "coingecko", "alternative.me"],
+                "ai_model": "claude-haiku-4.5",
+            },
+            "timestamp": int(_time.time() * 1000),
+        }
+
+        await tg_notify_request("/api/v1/market-read", "ALL", ip, 200)
+        return response
+
+    except Exception as e:
+        print(f"[ERR] market-read: {e}")
+        import traceback
+        traceback.print_exc()
+        await tg_notify_request("/api/v1/market-read", "ALL", ip, 500)
+        return JSONResponse(status_code=500, content={"error": str(e)})
