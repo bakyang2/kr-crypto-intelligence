@@ -1,3 +1,6 @@
 {
-  "owner": "bakyang2"
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "maintainers": [
+    "bakyang2"
+  ]
 }
