@@ -44,6 +44,7 @@ Uses the [x402 protocol](https://x402.org) for micropayments. AI agents pay $0.0
 
 - Python / FastAPI
 - x402 Payment Protocol (Base mainnet + Solana mainnet USDC)
+- Claude AI (Haiku 4.5) for market analysis
 - Cloudflare SSL
 - Oracle Cloud ARM (Always Free Tier)
 
