@@ -51,7 +51,13 @@ async def tg_notify_request(endpoint, symbol, ip, status_code=200):
     global tg_last_summary, tg_pending
     PAID_ENDPOINTS = ["/api/v1/kimchi-premium", "/api/v1/kr-prices", "/api/v1/fx-rate", "/api/v1/stablecoin-premium", "/api/v1/market-read", "/api/v1/arbitrage-scanner", "/api/v1/exchange-alerts", "/api/v1/market-movers"]
     if endpoint in PAID_ENDPOINTS and status_code < 400:
-        price = "$0.10" if "market-read" in endpoint else "$0.001"
+        price_map = {
+            "/api/v1/market-read": "$0.10",
+            "/api/v1/arbitrage-scanner": "$0.01",
+            "/api/v1/exchange-alerts": "$0.01",
+            "/api/v1/market-movers": "$0.01",
+        }
+        price = price_map.get(endpoint, "$0.001")
         await tg_send(f"💰 유료 결제 성공!\n엔드포인트: {endpoint}\n가격: {price}\nIP: {ip}\n시간: {time.strftime('%H:%M:%S')}")
     tg_pending.append({"endpoint": endpoint, "ip": ip, "time": time.strftime("%H:%M:%S"), "ok": status_code < 400})
     now = time.time()
