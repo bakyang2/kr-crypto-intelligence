@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 .env
 stats.json
+test_sentiment*.py
+patch_market_read.py
+*.pyc
+__pycache__/
