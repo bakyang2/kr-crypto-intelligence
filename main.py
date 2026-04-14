@@ -27,7 +27,7 @@ CACHE_TTL = 15
 SYMBOL_CACHE_TTL = 300
 MAX_CACHE_SIZE = 100
 RATE_LIMIT_PER_MINUTE = 60
-STATS_FILE = "/home/ubuntu/KRCryptoAPI/stats.json"
+STATS_FILE = os.getenv("STATS_FILE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "stats.json"))
 STATS_SAVE_INTERVAL = 60
 EXCHANGE_TIMEOUT = 10
 

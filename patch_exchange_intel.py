@@ -1,3 +1,4 @@
+import os
 import json
 import time
 import asyncio
@@ -35,7 +36,7 @@ intel_cache = {
     "last_update": 0,
 }
 
-ALERT_HISTORY_FILE = "/home/ubuntu/KRCryptoAPI/alert_history.json"
+ALERT_HISTORY_FILE = os.getenv("ALERT_HISTORY_FILE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "alert_history.json"))
 
 def load_alert_history():
     try:
