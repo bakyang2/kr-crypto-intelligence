@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from x402.http.middleware.fastapi import PaymentMiddlewareASGI
 from x402.http import HTTPFacilitatorClient, FacilitatorConfig, PaymentOption
 import anthropic
+from patch_exchange_intel import intel_cache, compute_intel_data, intel_polling_task, load_alert_history
 import asyncio
 from cdp.x402 import create_facilitator_config
 from x402.http.types import RouteConfig
@@ -48,6 +49,10 @@ async def tg_send(text):
 
 async def tg_notify_request(endpoint, symbol, ip, status_code=200):
     global tg_last_summary, tg_pending
+    PAID_ENDPOINTS = ["/api/v1/kimchi-premium", "/api/v1/kr-prices", "/api/v1/fx-rate", "/api/v1/stablecoin-premium", "/api/v1/market-read", "/api/v1/arbitrage-scanner", "/api/v1/exchange-alerts", "/api/v1/market-movers"]
+    if endpoint in PAID_ENDPOINTS and status_code < 400:
+        price = "$0.10" if "market-read" in endpoint else "$0.001"
+        await tg_send(f"💰 유료 결제 성공!\n엔드포인트: {endpoint}\n가격: {price}\nIP: {ip}\n시간: {time.strftime('%H:%M:%S')}")
     tg_pending.append({"endpoint": endpoint, "ip": ip, "time": time.strftime("%H:%M:%S"), "ok": status_code < 400})
     now = time.time()
     if now - tg_last_summary >= 60 and tg_pending:
@@ -348,6 +353,7 @@ async def lifespan(app):
     load_stats()
     await tg_send("🟢 <b>KR Crypto API</b> 서버 시작됨\nhttps://api.printmoneylab.com/health")
     task1 = asyncio.create_task(periodic_stats_save())
+    asyncio.create_task(intel_polling_task(fetch_fx_rate))
     task2 = asyncio.create_task(daily_summary_task())
     yield
     task1.cancel()
@@ -390,6 +396,24 @@ x402_routes = {
         accepts=[
             PaymentOption(scheme="exact", price="$0.001", network="eip155:8453", pay_to=WALLET_ADDRESS),
             PaymentOption(scheme="exact", price="$0.001", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
+        ]
+    ),
+    "GET /api/v1/arbitrage-scanner": RouteConfig(
+        accepts=[
+            PaymentOption(scheme="exact", price="$0.01", network="eip155:8453", pay_to=WALLET_ADDRESS),
+            PaymentOption(scheme="exact", price="$0.01", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
+        ]
+    ),
+    "GET /api/v1/exchange-alerts": RouteConfig(
+        accepts=[
+            PaymentOption(scheme="exact", price="$0.01", network="eip155:8453", pay_to=WALLET_ADDRESS),
+            PaymentOption(scheme="exact", price="$0.01", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
+        ]
+    ),
+    "GET /api/v1/market-movers": RouteConfig(
+        accepts=[
+            PaymentOption(scheme="exact", price="$0.01", network="eip155:8453", pay_to=WALLET_ADDRESS),
+            PaymentOption(scheme="exact", price="$0.01", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
         ]
     ),
     "GET /api/v1/market-read": RouteConfig(
@@ -816,13 +840,14 @@ Analyze this real-time data and provide a structured market read:
 
 Rules:
 - Be specific. Reference actual numbers from the data.
-- The summary should be 2-3 sentences of actionable insight.
+- The summary should be 3-4 sentences of actionable insight.
+- Include TOKEN-LEVEL calls when exchange_intelligence data shows notable signals (caution flags, premium outliers, volume spikes, 1-min movers).
 - Confidence is 1-10 based on how aligned the signals are.
-- key_factors should list the 3 most important data points driving your signal.
+- key_factors should list the 4-5 most important data points driving your signal.
+- token_alerts should list specific tokens with actionable flags (e.g. "WET: volume + deposit soaring = overheated, avoid longs").
 
 Respond ONLY with this JSON (no markdown, no backticks):
-{{"signal":"BULLISH or BEARISH or NEUTRAL","confidence":7,"summary":"Your analysis here.","key_factors":["factor1","factor2","factor3"],"risk_warning":"Main risk to watch."}}"""
-
+{{"signal":"BULLISH or BEARISH or NEUTRAL","confidence":7,"summary":"Your analysis here.","key_factors":["factor1","factor2","factor3","factor4"],"token_alerts":["TOKEN1: reason","TOKEN2: reason"],"risk_warning":"Main risk to watch."}}"""
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         message = client.messages.create(
@@ -844,6 +869,67 @@ Respond ONLY with this JSON (no markdown, no backticks):
         print(f"[ERR] Claude API: {e}")
         return {"signal": "ERROR", "confidence": 0, "summary": f"AI error: {str(e)[:100]}", "key_factors": [], "risk_warning": "Service temporarily unavailable."}
 
+
+
+# ============================================================
+# Korean Exchange Intelligence Endpoints
+# ============================================================
+
+@app.get("/api/v1/arbitrage-scanner")
+async def arbitrage_scanner(request: Request):
+    """Token-by-token Kimchi Premium, reverse premium, Upbit-Bithumb gap, market share"""
+    track_request("/api/v1/arbitrage-scanner")
+    ip = get_real_ip(request)
+    data = compute_intel_data()
+    if not data:
+        await tg_notify_request("/api/v1/arbitrage-scanner", "", ip, 503)
+        raise HTTPException(status_code=503, detail="Intel data not ready yet. Try again in 60 seconds.")
+    await tg_notify_request("/api/v1/arbitrage-scanner", "", ip)
+    return {
+        "premiums": data["premiums"],
+        "reverse_premiums": [p for p in data["premiums"] if p["premium_pct"] < 0],
+        "exchange_gaps": data["exchange_gaps"],
+        "market_share": data["market_share"],
+        "common_symbols_count": data["common_symbols_count"],
+        "fx_rate": data["fx_rate"],
+        "last_update": data["last_update"],
+        "meta": {"price": "$0.01", "update_interval": "60s"},
+    }
+
+@app.get("/api/v1/exchange-alerts")
+async def exchange_alerts(request: Request):
+    """Listing changes, caution/warning tokens"""
+    track_request("/api/v1/exchange-alerts")
+    ip = get_real_ip(request)
+    data = compute_intel_data()
+    if not data:
+        await tg_notify_request("/api/v1/exchange-alerts", "", ip, 503)
+        raise HTTPException(status_code=503, detail="Intel data not ready yet. Try again in 60 seconds.")
+    await tg_notify_request("/api/v1/exchange-alerts", "", ip)
+    return {
+        "listing_changes": data["listing_changes"],
+        "caution_tokens": data["caution_tokens"],
+        "last_update": data["last_update"],
+        "meta": {"price": "$0.01", "update_interval": "60s"},
+    }
+
+@app.get("/api/v1/market-movers")
+async def market_movers(request: Request):
+    """Volume spikes, price surges/crashes, top volume tokens"""
+    track_request("/api/v1/market-movers")
+    ip = get_real_ip(request)
+    data = compute_intel_data()
+    if not data:
+        await tg_notify_request("/api/v1/market-movers", "", ip, 503)
+        raise HTTPException(status_code=503, detail="Intel data not ready yet. Try again in 60 seconds.")
+    await tg_notify_request("/api/v1/market-movers", "", ip)
+    return {
+        "movers_1m": data["movers_1m"],
+        "volume_spikes": data["vol_spikes"],
+        "top_volume": data["top_volume"],
+        "last_update": data["last_update"],
+        "meta": {"price": "$0.01", "update_interval": "60s"},
+    }
 
 @app.get("/api/v1/market-read")
 async def market_read(request: Request):
@@ -869,6 +955,22 @@ async def market_read(request: Request):
         def safe(r):
             return r if not isinstance(r, Exception) else None
 
+        # intel 데이터 추가
+        intel = compute_intel_data()
+        intel_summary = {}
+        if intel:
+            top_premium = intel["premiums"][:5] if intel["premiums"] else []
+            top_reverse = [p for p in intel["premiums"] if p["premium_pct"] < 0][:5]
+            intel_summary = {
+                "top_premium_tokens": [{"symbol": p["symbol"], "premium_pct": p["premium_pct"]} for p in top_premium],
+                "top_reverse_premium": [{"symbol": p["symbol"], "premium_pct": p["premium_pct"]} for p in top_reverse],
+                "caution_tokens": intel["caution_tokens"][:10],
+                "movers_1m": intel["movers_1m"][:5],
+                "volume_spikes": intel["vol_spikes"][:5],
+                "exchange_gaps_top": intel["exchange_gaps"][:5],
+                "market_share": intel["market_share"],
+            }
+
         market_data = {
             "korean_market": {
                 "kimchi_premium": safe(results[0]),
@@ -883,6 +985,7 @@ async def market_read(request: Request):
                 "dominance": safe(results[7]),
                 "fear_greed_index": safe(results[8]),
             },
+            "exchange_intelligence": intel_summary,
         }
 
         loop = asyncio.get_event_loop()
@@ -895,12 +998,13 @@ async def market_read(request: Request):
             "confidence": f'{ai_analysis.get("confidence", 0)}/10',
             "summary": ai_analysis.get("summary", ""),
             "key_factors": ai_analysis.get("key_factors", []),
+            "token_alerts": ai_analysis.get("token_alerts", []),
             "risk_warning": ai_analysis.get("risk_warning", ""),
             "data": market_data,
             "meta": {
                 "price": "$0.10",
                 "processing_time_sec": elapsed,
-                "data_sources": ["upbit", "bithumb", "binance_futures", "coingecko", "alternative.me"],
+                "data_sources": ["upbit", "bithumb", "binance_futures", "coingecko", "alternative.me", "exchange_intelligence(180+tokens)"],
                 "ai_model": "claude-haiku-4.5",
             },
             "timestamp": int(_time.time() * 1000),

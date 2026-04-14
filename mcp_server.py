@@ -71,6 +71,42 @@ async def check_health() -> dict:
         r = await client.get(f"{API_BASE}/health")
         return r.json()
 
+
+@mcp.tool()
+async def get_arbitrage_scanner() -> dict:
+    """Scan Kimchi Premium for ALL tokens (180+) traded on both Upbit and Binance.
+    Returns: token-by-token premium %, reverse premiums (negative = Korean discount),
+    Upbit vs Bithumb price gaps, market share between exchanges.
+    Each token includes: warning flags, volume soaring alerts, deposit soaring alerts.
+    Updated every 60 seconds. Essential for cross-exchange arbitrage analysis.
+    """
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(f"{API_BASE}/api/v1/arbitrage-scanner")
+        return r.json()
+
+@mcp.tool()
+async def get_exchange_alerts() -> dict:
+    """Get Korean exchange alerts: new listings, delistings, investment warnings, and caution flags.
+    Detects: INVESTMENT_WARNING, PRICE_FLUCTUATIONS, VOLUME_SOARING, DEPOSIT_SOARING,
+    GLOBAL_PRICE_DIFF, SMALL_ACCOUNTS_CONCENTRATION.
+    New listings/delistings detected by comparing market list changes every 60 seconds.
+    Critical for risk management and early listing detection.
+    """
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(f"{API_BASE}/api/v1/exchange-alerts")
+        return r.json()
+
+@mcp.tool()
+async def get_market_movers() -> dict:
+    """Get Korean market movers: 1-minute price surges/crashes (>1%), volume spikes,
+    and top 20 tokens by trading volume on Upbit.
+    Detects rapid price movements and unusual volume activity in Korean crypto markets.
+    Korean retail activity often leads global price movements — early signal for traders.
+    """
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(f"{API_BASE}/api/v1/market-movers")
+        return r.json()
+
 if __name__ == "__main__":
     mcp.run(transport="streamable-http", host="0.0.0.0", port=8443)
 
