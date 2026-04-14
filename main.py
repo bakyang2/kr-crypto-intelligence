@@ -474,7 +474,7 @@ async def x402_manifest():
     return {
         "x402Version": 2,
         "name": "KR Crypto Intelligence",
-        "description": "Korean crypto market data for AI agents. Real-time Kimchi Premium, Upbit/Bithumb prices, USD/KRW FX rate.",
+        "description": "Korean crypto market data + AI analysis for AI agents. 10 endpoints, 180+ tokens. Kimchi Premium, exchange intelligence, AI market read.",
         "url": "https://api.printmoneylab.com",
         "mcp": "https://mcp.printmoneylab.com/mcp",
         "source": "https://github.com/bakyang2/kr-crypto-intelligence",
@@ -483,7 +483,10 @@ async def x402_manifest():
             {"path": "/api/v1/kr-prices", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean exchange prices (Upbit, Bithumb)"},
             {"path": "/api/v1/fx-rate", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "USD/KRW exchange rate"},
             {"path": "/api/v1/stablecoin-premium", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "USDT/USDC premium on Korean exchanges (fund flow indicator)"},
-            {"path": "/api/v1/market-read", "method": "GET", "price": "$0.10", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "AI-powered Korean crypto market analysis with signal, confidence, and actionable summary"}
+            {"path": "/api/v1/arbitrage-scanner", "method": "GET", "price": "$0.01", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Token-by-token Kimchi Premium for 180+ tokens, reverse premium, Upbit-Bithumb gaps, market share"},
+            {"path": "/api/v1/exchange-alerts", "method": "GET", "price": "$0.01", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "New listings/delistings, investment warnings, caution flags"},
+            {"path": "/api/v1/market-movers", "method": "GET", "price": "$0.01", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "1-min price surges/crashes, volume spikes, top volume tokens"},
+            {"path": "/api/v1/market-read", "method": "GET", "price": "$0.10", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "AI market analysis — 12+ data sources + exchange intelligence + Claude AI token-level signals"}
         ],
         "free_endpoints": [
             {"path": "/api/v1/symbols", "method": "GET", "description": "Available trading symbols"},
@@ -494,7 +497,7 @@ async def x402_manifest():
             {"scheme": "exact", "network": "eip155:8453", "asset": "USDC", "payTo": "0xcF9223eCe895258dEa8D288AEBcf846Ab8E342fB"},
             {"scheme": "exact", "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "asset": "USDC", "payTo": "3Ywxk31SvWKwZBdY6bLvjmn5h4mzWcT3HJ5UZbYXoVy9"}
         ],
-        "tags": ["korean", "crypto", "kimchi-premium", "upbit", "bithumb", "fx-rate", "market-data", "asia"]
+        "tags": ["korean", "crypto", "kimchi-premium", "upbit", "bithumb", "fx-rate", "market-data", "asia", "arbitrage", "exchange-intelligence", "ai-analysis"]
     }
 
 @app.get("/health")
