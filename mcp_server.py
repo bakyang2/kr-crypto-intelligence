@@ -108,15 +108,6 @@ async def get_market_movers() -> dict:
         r = await client.get(f"{API_BASE}/api/v1/market-movers")
         return r.json()
 
-if __name__ == "__main__":
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=8443)
-
-import anthropic
-import asyncio
-import os
-
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 async def get_market_read() -> dict:
     """AI-powered Korean crypto market analysis. Combines Kimchi Premium, stablecoin premium, FX rate, Upbit/Bithumb volume rankings, Binance funding rate, open interest, BTC dominance, and Fear & Greed index. Returns AI-generated signal (BULLISH/BEARISH/NEUTRAL), confidence score, actionable summary, and all raw data. Price: $0.10 via x402."""
@@ -250,3 +241,13 @@ Respond ONLY with JSON (no markdown):
         "data": market_data,
         "meta": {"price":"$0.10","data_sources":["upbit","bithumb","binance_futures","coingecko","alternative.me"],"ai_model":"claude-haiku-4.5"},
     }
+
+
+if __name__ == "__main__":
+    mcp.run(transport="streamable-http", host="0.0.0.0", port=8443)
+
+import anthropic
+import asyncio
+import os
+
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
