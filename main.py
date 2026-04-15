@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from x402.http.middleware.fastapi import PaymentMiddlewareASGI
 from x402.http import HTTPFacilitatorClient, FacilitatorConfig, PaymentOption
 import anthropic
-from patch_exchange_intel import intel_cache, compute_intel_data, intel_polling_task, load_alert_history
+from patch_exchange_intel import intel_cache, compute_intel_data, intel_polling_task, load_alert_history, tg_bot_polling
 import asyncio
 from cdp.x402 import create_facilitator_config
 from x402.http.types import RouteConfig
@@ -359,7 +359,8 @@ async def lifespan(app):
     load_stats()
     await tg_send("🟢 <b>KR Crypto API</b> 서버 시작됨\nhttps://api.printmoneylab.com/health")
     task1 = asyncio.create_task(periodic_stats_save())
-    asyncio.create_task(intel_polling_task(fetch_fx_rate))
+    asyncio.create_task(intel_polling_task(fetch_fx_rate, tg_func=tg_send))
+    asyncio.create_task(tg_bot_polling(TG_TOKEN, TG_CHAT))
     task2 = asyncio.create_task(daily_summary_task())
     yield
     task1.cancel()
