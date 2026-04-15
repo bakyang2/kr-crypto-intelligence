@@ -1,12 +1,13 @@
 import httpx
 from fastmcp import FastMCP
+from pydantic import Field
 
 API_BASE = "http://127.0.0.1:80"
 
 mcp = FastMCP("KR Crypto Intelligence")
 
-@mcp.tool()
-async def get_kimchi_premium(symbol: str = "BTC") -> dict:
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+async def get_kimchi_premium(symbol: str = Field(default="BTC", description="Crypto symbol to check premium for (e.g., BTC, ETH, XRP)")) -> dict:
     """Get real-time Kimchi Premium — the price difference between Korean exchanges (Upbit) and global exchanges (Binance).
     South Korea ranks top 3 globally in crypto trading volume.
     A positive premium means Korean traders are paying more than the global market price.
@@ -18,8 +19,8 @@ async def get_kimchi_premium(symbol: str = "BTC") -> dict:
         r = await client.get(f"{API_BASE}/api/v1/kimchi-premium", params={"symbol": symbol})
         return r.json()
 
-@mcp.tool()
-async def get_kr_prices(symbol: str = "BTC", exchange: str = "all") -> dict:
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+async def get_kr_prices(symbol: str = Field(default="BTC", description="Crypto symbol to query (e.g., BTC, ETH, XRP)"), exchange: str = Field(default="all", description="Exchange to query: upbit, bithumb, or all")) -> dict:
     """Get cryptocurrency prices from Korean exchanges (Upbit, Bithumb).
     Returns KRW-denominated prices, 24h volume, and change rate.
 
@@ -31,7 +32,7 @@ async def get_kr_prices(symbol: str = "BTC", exchange: str = "all") -> dict:
         r = await client.get(f"{API_BASE}/api/v1/kr-prices", params={"symbol": symbol, "exchange": exchange})
         return r.json()
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 async def get_fx_rate() -> dict:
     """Get current USD/KRW exchange rate.
     Essential for converting between Korean Won and US Dollar prices.
@@ -40,7 +41,7 @@ async def get_fx_rate() -> dict:
         r = await client.get(f"{API_BASE}/api/v1/fx-rate")
         return r.json()
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 async def get_available_symbols() -> dict:
     """Get all available trading symbols on Korean exchanges.
     Returns symbols available on Upbit, Bithumb, and those common to both.
@@ -51,7 +52,7 @@ async def get_available_symbols() -> dict:
         return r.json()
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 async def get_stablecoin_premium() -> dict:
     """Get USDT and USDC premium on Korean exchanges vs official USD/KRW rate.
     Positive premium = capital flowing INTO Korean crypto market.
@@ -62,7 +63,7 @@ async def get_stablecoin_premium() -> dict:
         r = await client.get(f"{API_BASE}/api/v1/stablecoin-premium")
         return r.json()
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 async def check_health() -> dict:
     """Check service health and exchange connectivity status.
     Returns status of Upbit, Bithumb, and Binance API connections.
@@ -72,7 +73,7 @@ async def check_health() -> dict:
         return r.json()
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 async def get_arbitrage_scanner() -> dict:
     """Scan Kimchi Premium for ALL tokens (180+) traded on both Upbit and Binance.
     Returns: token-by-token premium %, reverse premiums (negative = Korean discount),
@@ -84,7 +85,7 @@ async def get_arbitrage_scanner() -> dict:
         r = await client.get(f"{API_BASE}/api/v1/arbitrage-scanner")
         return r.json()
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 async def get_exchange_alerts() -> dict:
     """Get Korean exchange alerts: new listings, delistings, investment warnings, and caution flags.
     Detects: INVESTMENT_WARNING, PRICE_FLUCTUATIONS, VOLUME_SOARING, DEPOSIT_SOARING,
@@ -96,7 +97,7 @@ async def get_exchange_alerts() -> dict:
         r = await client.get(f"{API_BASE}/api/v1/exchange-alerts")
         return r.json()
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 async def get_market_movers() -> dict:
     """Get Korean market movers: 1-minute price surges/crashes (>1%), volume spikes,
     and top 20 tokens by trading volume on Upbit.
@@ -116,7 +117,7 @@ import os
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 async def get_market_read() -> dict:
     """AI-powered Korean crypto market analysis. Combines Kimchi Premium, stablecoin premium, FX rate, Upbit/Bithumb volume rankings, Binance funding rate, open interest, BTC dominance, and Fear & Greed index. Returns AI-generated signal (BULLISH/BEARISH/NEUTRAL), confidence score, actionable summary, and all raw data. Price: $0.10 via x402."""
     import httpx, json
