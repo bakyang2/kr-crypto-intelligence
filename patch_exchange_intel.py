@@ -374,6 +374,7 @@ async def intel_polling_task(fetch_fx_func, tg_func=None):
                     if abs(p["premium_pct"]) >= 10.0:
                         sym = p["symbol"]
                         if sym not in _alert_cooldown:
+                            _alert_cooldown[sym] = True
                             direction = "🔴 역김프" if p["premium_pct"] < 0 else "🟢 김프"
                             # 규칙 기반 해석 (비용 $0)
                             reasons = []
