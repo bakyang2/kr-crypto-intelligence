@@ -1,12 +1,12 @@
 ---
 name: kr-crypto-intelligence
-description: Korean crypto market data + AI analysis for trading agents. 10 endpoints, 180+ tokens. Real-time Kimchi Premium for all tokens, exchange intelligence (warnings, listings, volume spikes), AI market read with token-level signals. x402 on Base and Solana.
+description: Korean crypto market data + AI analysis for trading agents. 11 endpoints, 180+ tokens. Real-time Kimchi Premium, exchange intelligence, AI market read, and world's first Korean-to-English sentiment analysis. x402 on Base and Solana.
 ---
 
 # KR Crypto Intelligence
 
 ## Overview
-Korean crypto market data + AI analysis API for AI agents. South Korea ranks top 3 globally in crypto trading volume. 10 endpoints covering 180+ tokens.
+Korean crypto market data + AI analysis API for AI agents. South Korea ranks top 3 globally in crypto trading volume. 11 endpoints covering 180+ tokens.
 
 ## How to Use
 
@@ -24,7 +24,7 @@ MCP server — no local code, no API keys, no credentials needed.
 }
 ```
 
-### Available Tools (10)
+### Available Tools (11)
 
 #### Korean Exchange Intelligence ($0.01/call)
 | Tool | Description |
@@ -32,6 +32,11 @@ MCP server — no local code, no API keys, no credentials needed.
 | `get_arbitrage_scanner` | Token-by-token Kimchi Premium for 180+ tokens, reverse premium, Upbit-Bithumb gaps, market share |
 | `get_exchange_alerts` | New listings/delistings, investment warnings, caution flags |
 | `get_market_movers` | 1-min price surges/crashes, volume spikes, top 20 by volume |
+
+#### Korean Sentiment Analysis ($0.05/call)
+| Tool | Description |
+|------|-------------|
+| `get_kr_sentiment` | Korean market sentiment in English — combines exchange intelligence (189+ tokens) with Korean news context for AI-powered insights. 1-hour cache. |
 
 #### AI Analysis ($0.10/call)
 | Tool | Description |
@@ -71,6 +76,7 @@ Specifically, each tool sends:
 - `get_kr_prices`: `symbol` and `exchange` parameters only
 - `get_arbitrage_scanner`, `get_exchange_alerts`, `get_market_movers`: no parameters — server computes from cached exchange data
 - `get_market_read`: no parameters — server fetches all data internally and runs AI analysis server-side
+- `get_kr_sentiment`: no parameters — server combines exchange data with Korean news context and runs AI sentiment analysis server-side
 - `get_fx_rate`, `get_stablecoin_premium`, `get_available_symbols`, `check_health`: no parameters
 
 The server does NOT receive or store:
