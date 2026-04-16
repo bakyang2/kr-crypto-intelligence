@@ -7,3 +7,6 @@ test_sentiment*.py
 patch_market_read.py
 *.pyc
 __pycache__/
+kr_sentiment_cache.json
+stats.jsonl
+stats_archive/

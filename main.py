@@ -3,6 +3,7 @@ import json
 import re
 import os
 import asyncio
+from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 from contextlib import asynccontextmanager
 
@@ -15,12 +16,14 @@ from x402.http.middleware.fastapi import PaymentMiddlewareASGI
 from x402.http import HTTPFacilitatorClient, FacilitatorConfig, PaymentOption
 import anthropic
 from patch_exchange_intel import intel_cache, compute_intel_data, intel_polling_task, load_alert_history, tg_bot_polling
-import asyncio
 from cdp.x402 import create_facilitator_config
 from x402.http.types import RouteConfig
 from x402.server import x402ResourceServer
 from x402.mechanisms.evm.exact import ExactEvmServerScheme
 from x402.mechanisms.svm.exact import ExactSvmServerScheme
+
+from stats_logger import log_event, aggregate_stats, aggregate_stats_range, maybe_archive
+from kr_sentiment import handle_kr_sentiment, load_cache_from_disk as load_sentiment_cache
 
 # === 설정 ===
 CACHE_TTL = 15
@@ -49,10 +52,11 @@ async def tg_send(text):
 
 async def tg_notify_request(endpoint, symbol, ip, status_code=200):
     global tg_last_summary, tg_pending
-    PAID_ENDPOINTS = ["/api/v1/kimchi-premium", "/api/v1/kr-prices", "/api/v1/fx-rate", "/api/v1/stablecoin-premium", "/api/v1/market-read", "/api/v1/arbitrage-scanner", "/api/v1/exchange-alerts", "/api/v1/market-movers"]
+    PAID_ENDPOINTS = ["/api/v1/kimchi-premium", "/api/v1/kr-prices", "/api/v1/fx-rate", "/api/v1/stablecoin-premium", "/api/v1/market-read", "/api/v1/arbitrage-scanner", "/api/v1/exchange-alerts", "/api/v1/market-movers", "/api/v1/kr-sentiment"]
     if endpoint in PAID_ENDPOINTS and status_code < 400:
         price_map = {
             "/api/v1/market-read": "$0.10",
+            "/api/v1/kr-sentiment": "$0.05",
             "/api/v1/arbitrage-scanner": "$0.01",
             "/api/v1/exchange-alerts": "$0.01",
             "/api/v1/market-movers": "$0.01",
@@ -342,6 +346,7 @@ async def periodic_stats_save():
         save_stats()
 
 async def daily_summary_task():
+    """Legacy daily summary (simple stats)"""
     while True:
         now = time.localtime()
         seconds_until_midnight = (23 - now.tm_hour) * 3600 + (59 - now.tm_min) * 60 + (59 - now.tm_sec)
@@ -353,18 +358,53 @@ async def daily_summary_task():
             f"에러: {stats.get('errors', 0)}건"
         )
 
+async def daily_report_task():
+    """매일 KST 자정 (UTC 15:00)에 전일 상세 리포트 전송"""
+    while True:
+        try:
+            now_kst = datetime.now(timezone(timedelta(hours=9)))
+            next_midnight = (now_kst + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            wait_seconds = (next_midnight - now_kst).total_seconds()
+            await asyncio.sleep(wait_seconds)
+
+            yesterday_start = int((next_midnight - timedelta(days=1)).timestamp())
+            yesterday_end = int(next_midnight.timestamp())
+            s = aggregate_stats_range(yesterday_start, yesterday_end)
+            date_str = (next_midnight - timedelta(days=1)).strftime("%Y-%m-%d")
+
+            profit = s["revenue_usd"] - s["claude_cost_usd"]
+            msg = (
+                f"📊 <b>일일 리포트</b> — {date_str}\n\n"
+                f"API 호출: {s['api_calls_total']}건 (HIT {s['cache_hits']}, MISS {s['api_calls_total'] - s['cache_hits']})\n"
+                f"유료 결제: {s['paid_calls']}건 (${s['revenue_usd']:.2f})\n"
+                f"김프 알림: {s['alerts_sent']}건\n"
+                f"Claude 비용: ${s['claude_cost_usd']:.4f}\n"
+                f"에러: {s['errors']}건\n\n"
+                f"💰 일 순이익: ${profit:.4f}\n"
+                f"{'─' * 25}"
+            )
+            await tg_send(msg)
+
+            # Archive old stats if needed
+            maybe_archive()
+        except Exception as e:
+            print(f"[DAILY] report error: {e}")
+
 # === FastAPI 앱 ===
 @asynccontextmanager
 async def lifespan(app):
     load_stats()
+    load_sentiment_cache()
     await tg_send("🟢 <b>KR Crypto API</b> 서버 시작됨\nhttps://api.printmoneylab.com/health")
     task1 = asyncio.create_task(periodic_stats_save())
     asyncio.create_task(intel_polling_task(fetch_fx_rate, tg_func=tg_send))
     asyncio.create_task(tg_bot_polling(TG_TOKEN, TG_CHAT))
     task2 = asyncio.create_task(daily_summary_task())
+    task3 = asyncio.create_task(daily_report_task())
     yield
     task1.cancel()
     task2.cancel()
+    task3.cancel()
     save_stats()
 
 # === x402 결제 설정 ===
@@ -429,11 +469,17 @@ x402_routes = {
             PaymentOption(scheme="exact", price="$0.1", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
         ]
     ),
+    "GET /api/v1/kr-sentiment": RouteConfig(
+        accepts=[
+            PaymentOption(scheme="exact", price="$0.05", network="eip155:8453", pay_to=WALLET_ADDRESS),
+            PaymentOption(scheme="exact", price="$0.05", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
+        ]
+    ),
 }
 
 app = FastAPI(
     title="KR Crypto Intelligence API",
-    description="Korean crypto market data for AI agents. Kimchi premium, exchange prices, FX rates.",
+    description="Korean crypto market data + AI sentiment for AI agents. Kimchi premium, exchange intelligence, sentiment analysis.",
     version="0.1.0",
     lifespan=lifespan
 )
@@ -469,6 +515,7 @@ async def root():
             "/api/v1/kimchi-premium": "Real-time Kimchi Premium (Upbit vs Binance)",
             "/api/v1/kr-prices": "Korean exchange prices (Upbit, Bithumb)",
             "/api/v1/fx-rate": "USD/KRW exchange rate",
+            "/api/v1/kr-sentiment": "Korean crypto sentiment — AI analysis + news ($0.05)",
             "/api/v1/symbols": "Available trading symbols",
             "/api/v1/stats": "API usage statistics",
             "/health": "Service health check (free)"
@@ -493,7 +540,8 @@ async def x402_manifest():
             {"path": "/api/v1/arbitrage-scanner", "method": "GET", "price": "$0.01", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Token-by-token Kimchi Premium for 180+ tokens, reverse premium, Upbit-Bithumb gaps, market share"},
             {"path": "/api/v1/exchange-alerts", "method": "GET", "price": "$0.01", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "New listings/delistings, investment warnings, caution flags"},
             {"path": "/api/v1/market-movers", "method": "GET", "price": "$0.01", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "1-min price surges/crashes, volume spikes, top volume tokens"},
-            {"path": "/api/v1/market-read", "method": "GET", "price": "$0.10", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "AI market analysis — 12+ data sources + exchange intelligence + Claude AI token-level signals"}
+            {"path": "/api/v1/market-read", "method": "GET", "price": "$0.10", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "AI market analysis — 12+ data sources + exchange intelligence + Claude AI token-level signals"},
+            {"path": "/api/v1/kr-sentiment", "method": "GET", "price": "$0.05", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean crypto sentiment — exchange intelligence + Korean news + AI analysis. First-in-world Korean-to-English crypto sentiment API"}
         ],
         "free_endpoints": [
             {"path": "/api/v1/symbols", "method": "GET", "description": "Available trading symbols"},
@@ -537,6 +585,7 @@ async def symbols():
 @app.get("/api/v1/kimchi-premium")
 async def kimchi_premium(symbol: str = Query(default="BTC", description="Crypto symbol (e.g., BTC, ETH, XRP)")):
     track_request("kimchi-premium")
+    log_event("api_call", endpoint="kimchi-premium", paid=True, price_usd=0.001)
     symbol = validate_symbol(symbol)
     try:
         upbit = await fetch_upbit_price(symbol)
@@ -573,6 +622,7 @@ async def kimchi_premium(symbol: str = Query(default="BTC", description="Crypto 
 @app.get("/api/v1/stablecoin-premium")
 async def stablecoin_premium():
     track_request("stablecoin-premium")
+    log_event("api_call", endpoint="stablecoin-premium", paid=True, price_usd=0.001)
     try:
         fx = await fetch_fx_rate()
         official_rate = fx["rate"]
@@ -616,6 +666,7 @@ async def kr_prices(
     exchange: str = Query(default="all", description="Exchange: upbit, bithumb, or all")
 ):
     track_request("kr-prices")
+    log_event("api_call", endpoint="kr-prices", paid=True, price_usd=0.001)
     symbol = validate_symbol(symbol)
     exchange = exchange.lower().strip()
     if exchange not in ("upbit", "bithumb", "all"):
@@ -638,6 +689,7 @@ async def kr_prices(
 @app.get("/api/v1/fx-rate")
 async def fx_rate_endpoint():
     track_request("fx-rate")
+    log_event("api_call", endpoint="fx-rate", paid=True, price_usd=0.001)
     try:
         return await fetch_fx_rate()
     except HTTPException:
@@ -659,6 +711,24 @@ async def get_stats():
         "uptime_seconds": round(time.time() - start_time),
         "cache_size": len(cache)
     }
+
+# === kr-sentiment endpoint ===
+@app.get("/api/v1/kr-sentiment")
+async def kr_sentiment_endpoint(request: Request):
+    """Korean crypto market sentiment — AI analysis combining exchange data + Korean news."""
+    track_request("/api/v1/kr-sentiment")
+    ip = get_real_ip(request)
+    try:
+        result = await handle_kr_sentiment(tg_send_func=tg_send)
+        log_event("api_call", endpoint="kr-sentiment", paid=True, price_usd=0.05)
+        await tg_notify_request("/api/v1/kr-sentiment", "", ip, 200)
+        return result
+    except Exception as e:
+        stats["errors"] += 1
+        log_event("error", endpoint="kr-sentiment", error=str(e)[:200])
+        await tg_notify_request("/api/v1/kr-sentiment", "", ip, 503)
+        raise HTTPException(status_code=503, detail=f"Sentiment analysis failed: {str(e)[:100]}")
+
 
 if __name__ == "__main__":
     import uvicorn
@@ -889,6 +959,7 @@ Respond ONLY with this JSON (no markdown, no backticks):
 async def arbitrage_scanner(request: Request):
     """Token-by-token Kimchi Premium, reverse premium, Upbit-Bithumb gap, market share"""
     track_request("/api/v1/arbitrage-scanner")
+    log_event("api_call", endpoint="arbitrage-scanner", paid=True, price_usd=0.01)
     ip = get_real_ip(request)
     data = compute_intel_data()
     if not data:
@@ -910,6 +981,7 @@ async def arbitrage_scanner(request: Request):
 async def exchange_alerts(request: Request):
     """Listing changes, caution/warning tokens"""
     track_request("/api/v1/exchange-alerts")
+    log_event("api_call", endpoint="exchange-alerts", paid=True, price_usd=0.01)
     ip = get_real_ip(request)
     data = compute_intel_data()
     if not data:
@@ -927,6 +999,7 @@ async def exchange_alerts(request: Request):
 async def market_movers(request: Request):
     """Volume spikes, price surges/crashes, top volume tokens"""
     track_request("/api/v1/market-movers")
+    log_event("api_call", endpoint="market-movers", paid=True, price_usd=0.01)
     ip = get_real_ip(request)
     data = compute_intel_data()
     if not data:
@@ -947,6 +1020,7 @@ async def market_read(request: Request):
     import time as _time
     start = _time.time()
     ip = get_real_ip(request)
+    log_event("api_call", endpoint="market-read", paid=True, price_usd=0.10)
 
     try:
         results = await asyncio.gather(

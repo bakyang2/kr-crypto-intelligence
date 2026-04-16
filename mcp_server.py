@@ -243,6 +243,19 @@ Respond ONLY with JSON (no markdown):
     }
 
 
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+async def get_kr_sentiment() -> dict:
+    """Korean crypto market sentiment analysis in English.
+    Combines exchange intelligence (189+ tokens premium, warnings, volume spikes)
+    with Korean news context (Coinness Telegram) for AI-powered real-time insights.
+    First-in-world Korean-to-English crypto sentiment API.
+    Returns: sentiment label, score (-1 to +1), English report, exchange signals, news context.
+    1-hour cache. $0.05 per call via x402."""
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await c.get(f"{API_BASE}/api/v1/kr-sentiment")
+        return r.json()
+
+
 if __name__ == "__main__":
     mcp.run(transport="streamable-http", host="0.0.0.0", port=8443)
 

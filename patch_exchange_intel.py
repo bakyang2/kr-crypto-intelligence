@@ -3,6 +3,9 @@ import json
 import time
 import asyncio
 import httpx
+from datetime import datetime, timezone, timedelta
+
+from stats_logger import log_event, aggregate_stats, aggregate_stats_range
 
 # ============================================================
 # Korean Exchange Intelligence - Background Collector
@@ -391,6 +394,7 @@ async def intel_polling_task(fetch_fx_func, tg_func=None):
                             elif p["premium_pct"] < -10:
                                 reasons.append("→ 한국 투매 또는 상폐/규제 우려 가능")
                             reason_text = "\n".join(reasons) if reasons else "특이사항 없음"
+                            log_event("alert_sent", symbol=sym, premium=p["premium_pct"])
                             asyncio.create_task(tg_send_func(
                                 f"{direction} 이상치 감지!\n"
                                 f"토큰: {p['symbol']} ({p.get('korean_name', '')})\n"
@@ -423,13 +427,13 @@ async def intel_polling_task(fetch_fx_func, tg_func=None):
 _tg_last_update_id = 0
 
 async def tg_bot_polling(tg_token, tg_chat):
-    """텔레그램 봇 메시지 폴링 — /kimp 명령어 처리"""
+    """텔레그램 봇 메시지 폴링 — /kimp, /sentiment, /stats, /cost 명령어 처리"""
     global _tg_last_update_id
     if not tg_token or not tg_chat:
         return
     while True:
         try:
-            async with httpx.AsyncClient(timeout=10) as c:
+            async with httpx.AsyncClient(timeout=40) as c:
                 r = await c.get(
                     f"https://api.telegram.org/bot{tg_token}/getUpdates",
                     params={"offset": _tg_last_update_id + 1, "timeout": 30}
@@ -438,14 +442,20 @@ async def tg_bot_polling(tg_token, tg_chat):
                 for u in updates:
                     _tg_last_update_id = u["update_id"]
                     msg = u.get("message", {})
-                    text = msg.get("text", "")
+                    text = msg.get("text", "").strip()
                     chat_id = str(msg.get("chat", {}).get("id", ""))
                     if chat_id != tg_chat:
                         continue
-                    if text.strip() == "/kimp":
+                    if text == "/kimp":
                         await handle_kimp_command(tg_token, tg_chat)
+                    elif text == "/sentiment":
+                        await handle_sentiment_command(tg_token, tg_chat)
+                    elif text == "/stats":
+                        await handle_stats_command(tg_token, tg_chat)
+                    elif text == "/cost":
+                        await handle_cost_command(tg_token, tg_chat)
         except Exception as e:
-            print(f"[TG-POLL] error: {e}")
+            print(f"[TG-POLL] error: {type(e).__name__}: {e}")
         await asyncio.sleep(5)
 
 async def handle_kimp_command(tg_token, tg_chat):
@@ -486,11 +496,121 @@ async def handle_kimp_command(tg_token, tg_chat):
     msg += f"\n\n🕐 {time.strftime('%H:%M:%S KST', time.localtime(time.time() + 32400))}"
     await _tg_reply(tg_token, tg_chat, msg)
 
+async def handle_sentiment_command(tg_token, tg_chat):
+    """텔레그램 /sentiment — 캐시 활용 즉시 응답"""
+    try:
+        from kr_sentiment import handle_kr_sentiment
+        result = await handle_kr_sentiment(tg_send_func=None)
+
+        sentiment = result.get("sentiment", "UNKNOWN")
+        score = result.get("score", 0)
+        report = result.get("report_en", "N/A")
+        es = result.get("exchange_signals", {})
+        nc = result.get("news_context", {})
+        meta = result.get("_meta", {})
+        cache_age = meta.get("cache_age_seconds", 0)
+
+        # Sentiment emoji
+        emoji_map = {"BULLISH": "🟢", "BEARISH": "🔴", "NEUTRAL": "⚪", "CAUTIOUS_FOMO": "🟡",
+                     "PANIC": "🔴", "GREED": "🟢", "UNCERTAIN": "❓"}
+        emoji = emoji_map.get(sentiment, "❓")
+
+        msg = (
+            f"{emoji} <b>KR Sentiment</b>: {sentiment} ({score:+.2f})\n\n"
+            f"{report}\n\n"
+            f"📊 Exchange: 김프 avg {es.get('avg_premium_pct', 0)}%, 경고 {es.get('warnings', 0)}개\n"
+        )
+        if es.get("deposit_soaring"):
+            msg += f"💰 입금급등: {', '.join(es['deposit_soaring'][:5])}\n"
+        if es.get("volume_soaring"):
+            msg += f"📈 거래량급등: {', '.join(es['volume_soaring'][:5])}\n"
+        msg += (
+            f"\n📰 뉴스: {nc.get('korean_count', 0)}/{nc.get('total_analyzed', 0)}건 한국관련\n"
+            f"🕐 캐시: {cache_age}s전 | {time.strftime('%H:%M KST', time.localtime(time.time() + 32400))}"
+        )
+        await _tg_reply(tg_token, tg_chat, msg)
+    except Exception as e:
+        await _tg_reply(tg_token, tg_chat, f"❌ Sentiment 오류: {str(e)[:100]}")
+
+
+async def handle_stats_command(tg_token, tg_chat):
+    """텔레그램 /stats — 오늘/이번주/이번달 통계"""
+    try:
+        now_kst = datetime.now(timezone(timedelta(hours=9)))
+
+        # 오늘 (KST 기준)
+        today_start = now_kst.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_ts = int(today_start.timestamp())
+        today = aggregate_stats(today_ts)
+
+        # 이번주 (월요일 시작)
+        weekday = now_kst.weekday()
+        week_start = (now_kst - timedelta(days=weekday)).replace(hour=0, minute=0, second=0, microsecond=0)
+        week_ts = int(week_start.timestamp())
+        week = aggregate_stats(week_ts)
+
+        # 이번달
+        month_start = now_kst.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        month_ts = int(month_start.timestamp())
+        month = aggregate_stats(month_ts)
+
+        msg = (
+            f"📊 <b>KR Crypto Intelligence 통계</b>\n\n"
+            f"─── 오늘 ───\n"
+            f"API 호출: {today['api_calls_total']}건 (캐시 HIT {today['cache_hits']}, MISS {today['api_calls_total'] - today['cache_hits']})\n"
+            f"유료 결제: {today['paid_calls']}건 (${today['revenue_usd']:.2f})\n"
+            f"김프 알림: {today['alerts_sent']}건\n"
+            f"Claude 비용: ${today['claude_cost_usd']:.4f}\n\n"
+            f"─── 이번주 ───\n"
+            f"API: {week['api_calls_total']}건, 수익 ${week['revenue_usd']:.2f}, 비용 ${week['claude_cost_usd']:.4f}\n\n"
+            f"─── 이번달 ───\n"
+            f"API: {month['api_calls_total']}건, 수익 ${month['revenue_usd']:.2f}, 비용 ${month['claude_cost_usd']:.4f}\n"
+            f"💰 순이익: ${month['revenue_usd'] - month['claude_cost_usd']:.4f}\n\n"
+            f"🕐 {now_kst.strftime('%Y-%m-%d %H:%M KST')}"
+        )
+        await _tg_reply(tg_token, tg_chat, msg)
+    except Exception as e:
+        await _tg_reply(tg_token, tg_chat, f"❌ Stats 오류: {str(e)[:100]}")
+
+
+async def handle_cost_command(tg_token, tg_chat):
+    """텔레그램 /cost — Claude API 비용 상세"""
+    try:
+        now_kst = datetime.now(timezone(timedelta(hours=9)))
+        today_start = now_kst.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_ts = int(today_start.timestamp())
+        today = aggregate_stats(today_ts)
+
+        month_start = now_kst.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        month_ts = int(month_start.timestamp())
+        month = aggregate_stats(month_ts)
+
+        msg = (
+            f"💳 <b>Claude API 비용 상세</b>\n\n"
+            f"─── 오늘 ───\n"
+            f"Claude 호출: {today['claude_calls']}회\n"
+            f"Claude 비용: ${today['claude_cost_usd']:.6f}\n\n"
+            f"─── 이번달 ───\n"
+            f"Claude 호출: {month['claude_calls']}회\n"
+            f"Claude 비용: ${month['claude_cost_usd']:.6f}\n\n"
+            f"─── 엔드포인트별 ───\n"
+        )
+        ep_data = month.get("by_endpoint", {})
+        for ep, data in sorted(ep_data.items(), key=lambda x: x[1].get("cost", 0), reverse=True):
+            if data.get("claude", 0) > 0:
+                msg += f"  {ep}: {data['claude']}회, ${data['cost']:.6f}\n"
+
+        msg += f"\n🕐 {now_kst.strftime('%Y-%m-%d %H:%M KST')}"
+        await _tg_reply(tg_token, tg_chat, msg)
+    except Exception as e:
+        await _tg_reply(tg_token, tg_chat, f"❌ Cost 오류: {str(e)[:100]}")
+
+
 async def _tg_reply(tg_token, tg_chat, text):
     try:
         async with httpx.AsyncClient(timeout=5) as c:
             await c.post(f"https://api.telegram.org/bot{tg_token}/sendMessage",
-                         json={"chat_id": tg_chat, "text": text})
+                         json={"chat_id": tg_chat, "text": text, "parse_mode": "HTML"})
     except Exception:
         pass
 
