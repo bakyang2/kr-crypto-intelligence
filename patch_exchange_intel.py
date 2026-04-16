@@ -377,7 +377,7 @@ async def intel_polling_task(fetch_fx_func, tg_func=None):
                     if abs(p["premium_pct"]) >= 10.0:
                         sym = p["symbol"]
                         if sym not in _alert_cooldown:
-                            _alert_cooldown[sym] = True
+                            _alert_cooldown[sym] = time.time()
                             direction = "🔴 역김프" if p["premium_pct"] < 0 else "🟢 김프"
                             # 규칙 기반 해석 (비용 $0)
                             reasons = []
@@ -405,12 +405,11 @@ async def intel_polling_task(fetch_fx_func, tg_func=None):
                                 f"\n📋 분석:\n{reason_text}"
                             ))
 
-            # 10% 미만으로 돌아온 토큰 쿨다운 해제
-            if intel:
-                current_extreme = {p["symbol"] for p in intel.get("premiums", []) if abs(p["premium_pct"]) >= 10.0}
-                expired = [s for s in _alert_cooldown if s not in current_extreme]
-                for s in expired:
-                    del _alert_cooldown[s]
+            # 6시간 경과한 토큰 쿨다운 해제
+            now_ts = time.time()
+            expired = [s for s, ts in _alert_cooldown.items() if now_ts - ts > 21600]
+            for s in expired:
+                del _alert_cooldown[s]
 
             intel_cache["last_update"] = time.time()
             intel_cache["common_symbols"] = sorted(set(intel_cache["upbit_tickers"].keys()) & set(intel_cache["binance_tickers"].keys()))
