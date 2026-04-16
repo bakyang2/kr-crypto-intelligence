@@ -1,10 +1,15 @@
 # KR Crypto Intelligence API
 
-Korean crypto market data + AI analysis for AI agents. 10 endpoints, 180+ tokens. Pay-per-use via x402 protocol on Base and Solana.
+Korean crypto market data + AI analysis for AI agents. 11 endpoints, 180+ tokens, world's first Korean-to-English crypto sentiment API. Pay-per-use via x402 protocol on Base and Solana.
 
-## Endpoints (10)
+## Endpoints (11)
 
-### Korean Exchange Intelligence (NEW)
+### Korean Sentiment Analysis (NEW — World's First)
+| Endpoint | Price | Description |
+|----------|-------|-------------|
+| `/api/v1/kr-sentiment` | $0.05 | Korean market sentiment in English — combines exchange intelligence (189+ tokens) with Korean news context (Coinness Telegram) for AI-powered insights. 1-hour cache. |
+
+### Korean Exchange Intelligence
 | Endpoint | Price | Description |
 |----------|-------|-------------|
 | `/api/v1/arbitrage-scanner` | $0.01 | Token-by-token Kimchi Premium for 180+ tokens, reverse premium, Upbit-Bithumb price gaps, market share |
@@ -38,8 +43,15 @@ Korean crypto market data + AI analysis for AI agents. 10 endpoints, 180+ tokens
 
 ## Key Features
 
+### KR Sentiment (Unique — No Competitors Worldwide)
+- Real-time Korean market sentiment delivered in English
+- Combines exchange data (189+ tokens Kimchi Premium, warnings, volume spikes, deposit soaring) with Korean news context (Coinness Telegram, 6-hour window)
+- Claude AI generates: sentiment (BULLISH/BEARISH/CAUTIOUS_FOMO/PANIC/GREED/UNCERTAIN), score (-1.0 to +1.0), English report, exchange signals, news context, sources
+- Academic research validates: "Korean news sentiment predicts global crypto returns" (2026)
+- 1-hour cache + lazy invocation + concurrency lock for cost efficiency
+
 ### Arbitrage Scanner
-- Real-time Kimchi Premium for **every token** traded on both Upbit and Binance (180+)
+- Real-time Kimchi Premium for **every token** traded on both Upbit and Binance (189+)
 - Reverse premium detection (Korean discount = buy signal)
 - Upbit vs Bithumb price gap scanner (domestic arbitrage)
 - Market share tracking (Upbit vs Bithumb volume)
@@ -69,11 +81,12 @@ Uses the [x402 protocol](https://x402.org) for micropayments. No API key, no sub
 - **Upbit** — Largest Korean crypto exchange (245+ KRW markets)
 - **Bithumb** — Second largest Korean exchange (450+ markets)
 - **Binance** — Global price reference (659+ USDT markets)
+- **Coinness Telegram** — Korean crypto news source for sentiment analysis
 - **exchangerate-api.com** — USD/KRW FX rate
 - **CoinGecko** — BTC/ETH/ALT dominance
 - **Alternative.me** — Fear & Greed Index
 - **Binance Futures** — Funding rate, open interest
-- **Claude AI (Haiku 4.5)** — Market analysis
+- **Claude AI (Haiku 4.5)** — Market analysis and sentiment interpretation
 
 ## MCP Server
 
@@ -89,17 +102,17 @@ Connect any MCP-compatible AI agent (Claude, Cursor, etc.):
 }
 ```
 
-10 tools available: `get_kimchi_premium`, `get_kr_prices`, `get_fx_rate`, `get_stablecoin_premium`, `get_available_symbols`, `check_health`, `get_market_read`, `get_arbitrage_scanner`, `get_exchange_alerts`, `get_market_movers`
+11 tools available: `get_kimchi_premium`, `get_kr_prices`, `get_fx_rate`, `get_stablecoin_premium`, `get_available_symbols`, `check_health`, `get_market_read`, `get_arbitrage_scanner`, `get_exchange_alerts`, `get_market_movers`, `get_kr_sentiment`
 
 ## Tech Stack
 
 - Python / FastAPI
-- x402 Payment Protocol (Base + Solana USDC)
+- x402 Payment Protocol v2 (Base + Solana USDC)
 - CDP Facilitator (Coinbase Developer Platform)
-- Claude AI (Haiku 4.5) for market analysis
+- Claude AI (Haiku 4.5) for market analysis and sentiment
 - FastMCP (Streamable HTTP transport)
 - Cloudflare SSL
-- Oracle Cloud ARM (Always Free Tier, $0/month)
+- Oracle Cloud ARM (Always Free Tier, \$0/month)
 
 ## License
 
