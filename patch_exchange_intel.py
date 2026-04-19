@@ -370,47 +370,6 @@ async def intel_polling_task(fetch_fx_func, tg_func=None):
 
 
 
-            # 김프 이상치 알림 (±10%)
-            intel = compute_intel_data()
-            if intel and tg_send_func:
-                for p in intel.get("premiums", []):
-                    if abs(p["premium_pct"]) >= 10.0:
-                        sym = p["symbol"]
-                        if sym not in _alert_cooldown:
-                            _alert_cooldown[sym] = time.time()
-                            direction = "🔴 역김프" if p["premium_pct"] < 0 else "🟢 김프"
-                            # 규칙 기반 해석 (비용 $0)
-                            reasons = []
-                            if p.get("warning"): reasons.append("⛔ 투자경고 종목")
-                            if p.get("caution_volume_soaring"): reasons.append("📈 거래량 급등 중")
-                            if p.get("caution_deposit_soaring"): reasons.append("💰 입금액 급등 중")
-                            if p.get("caution_global_price_diff"): reasons.append("🌍 업비트 자체 가격괴리 플래그")
-                            vol = p.get("upbit_volume_krw", 0)
-                            if vol > 50_000_000_000: reasons.append(f"🔥 거래대금 {vol/1_000_000_000:.0f}B KRW (과열)")
-                            elif vol > 10_000_000_000: reasons.append(f"📊 거래대금 {vol/1_000_000_000:.1f}B KRW")
-                            elif vol < 1_000_000_000: reasons.append("⚠️ 거래대금 극소 — 유동성 부족 가능")
-                            if p["premium_pct"] > 10:
-                                reasons.append("→ 한국 수요 과열 또는 글로벌 대비 고평가")
-                            elif p["premium_pct"] < -10:
-                                reasons.append("→ 한국 투매 또는 상폐/규제 우려 가능")
-                            reason_text = "\n".join(reasons) if reasons else "특이사항 없음"
-                            log_event("alert_sent", symbol=sym, premium=p["premium_pct"])
-                            asyncio.create_task(tg_send_func(
-                                f"{direction} 이상치 감지!\n"
-                                f"토큰: {p['symbol']} ({p.get('korean_name', '')})\n"
-                                f"김프: {p['premium_pct']}%\n"
-                                f"업비트: {p['upbit_krw']:,.0f} KRW\n"
-                                f"바이낸스: ${p['binance_usd']}\n"
-                                f"글로벌 환산: {p['global_krw']:,.0f} KRW\n"
-                                f"\n📋 분석:\n{reason_text}"
-                            ))
-
-            # 6시간 경과한 토큰 쿨다운 해제
-            now_ts = time.time()
-            expired = [s for s, ts in _alert_cooldown.items() if now_ts - ts > 21600]
-            for s in expired:
-                del _alert_cooldown[s]
-
             intel_cache["last_update"] = time.time()
             intel_cache["common_symbols"] = sorted(set(intel_cache["upbit_tickers"].keys()) & set(intel_cache["binance_tickers"].keys()))
 
