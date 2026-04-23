@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Query, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 # === x402 결제 ===
 from x402.http.middleware.fastapi import PaymentMiddlewareASGI
@@ -410,7 +410,8 @@ async def lifespan(app):
 # === x402 결제 설정 ===
 WALLET_ADDRESS = "0xcF9223eCe895258dEa8D288AEBcf846Ab8E342fB"
 SOLANA_WALLET = "3Ywxk31SvWKwZBdY6bLvjmn5h4mzWcT3HJ5UZbYXoVy9"
-SOLANA_NETWORK = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" 
+SOLANA_NETWORK = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+POLYGON_NETWORK = "eip155:137"
 FACILITATOR_URL = "https://api.cdp.coinbase.com/platform/v2/x402"
 
 cdp_config = create_facilitator_config()
@@ -418,62 +419,180 @@ x402_server = x402ResourceServer(
     HTTPFacilitatorClient(cdp_config)
 )
 x402_server.register("eip155:8453", ExactEvmServerScheme())
+x402_server.register("eip155:137", ExactEvmServerScheme())
 x402_server.register("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", ExactSvmServerScheme())
+
+# Helper: create PaymentOption list for a given price (Base + Polygon + Solana)
+def _pay_opts(price: str):
+    return [
+        PaymentOption(scheme="exact", price=price, network="eip155:8453", pay_to=WALLET_ADDRESS),
+        PaymentOption(scheme="exact", price=price, network=POLYGON_NETWORK, pay_to=WALLET_ADDRESS),
+        PaymentOption(scheme="exact", price=price, network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
+    ]
 
 x402_routes = {
     "GET /api/v1/kimchi-premium": RouteConfig(
-        accepts=[
-            PaymentOption(scheme="exact", price="$0.001", network="eip155:8453", pay_to=WALLET_ADDRESS),
-            PaymentOption(scheme="exact", price="$0.001", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
-        ]
+        accepts=_pay_opts("$0.001"),
+        description="Real-time Kimchi Premium for a single token (Upbit vs Binance via FX rate)",
+        mime_type="application/json",
+        extensions={"bazaar": {"info": {
+            "input": {"query_params": {"symbol": "BTC"}},
+            "input_schema": {
+                "type": "object",
+                "properties": {"symbol": {"type": "string", "description": "Crypto symbol (e.g., BTC, ETH, XRP)"}},
+                "required": ["symbol"],
+            },
+            "output": {"type": "json", "example": {
+                "symbol": "BTC",
+                "upbit_krw": 142000000,
+                "binance_usdt": 95200.5,
+                "fx_rate": 1475.27,
+                "fx_source": "exchangerate-api.com",
+                "binance_krw_equivalent": 140453370,
+                "premium_percent": 1.1,
+                "premium_direction": "positive",
+                "timestamp": 1776340000000,
+            }},
+        }}},
     ),
     "GET /api/v1/kr-prices": RouteConfig(
-        accepts=[
-            PaymentOption(scheme="exact", price="$0.001", network="eip155:8453", pay_to=WALLET_ADDRESS),
-            PaymentOption(scheme="exact", price="$0.001", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
-        ]
+        accepts=_pay_opts("$0.001"),
+        description="Korean exchange prices (Upbit, Bithumb) for a single token in KRW",
+        mime_type="application/json",
+        extensions={"bazaar": {"info": {
+            "input": {"query_params": {"symbol": "BTC", "exchange": "all"}},
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "Crypto symbol (e.g., BTC, ETH)"},
+                    "exchange": {"type": "string", "enum": ["upbit", "bithumb", "all"], "description": "Exchange to query"},
+                },
+                "required": ["symbol"],
+            },
+            "output": {"type": "json", "example": {
+                "symbol": "BTC",
+                "data": {
+                    "upbit": {"exchange": "upbit", "symbol": "BTC", "price_krw": 142000000, "volume_24h": 1234567.89, "change_rate": 0.02, "data_age_seconds": 0},
+                    "bithumb": {"exchange": "bithumb", "symbol": "BTC", "price_krw": 141950000, "volume_24h": 987654.32, "change_rate": 0.019, "data_age_seconds": 0},
+                },
+                "timestamp": 1776340000000,
+            }},
+        }}},
     ),
     "GET /api/v1/fx-rate": RouteConfig(
-        accepts=[
-            PaymentOption(scheme="exact", price="$0.001", network="eip155:8453", pay_to=WALLET_ADDRESS),
-            PaymentOption(scheme="exact", price="$0.001", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
-        ]
+        accepts=_pay_opts("$0.001"),
+        description="Current USD/KRW foreign exchange rate",
+        mime_type="application/json",
+        extensions={"bazaar": {"info": {
+            "output": {"type": "json", "example": {
+                "base": "USD", "quote": "KRW", "rate": 1475.27,
+                "source": "exchangerate-api.com", "timestamp": 1776340000000, "data_age_seconds": 0,
+            }},
+        }}},
     ),
     "GET /api/v1/stablecoin-premium": RouteConfig(
-        accepts=[
-            PaymentOption(scheme="exact", price="$0.001", network="eip155:8453", pay_to=WALLET_ADDRESS),
-            PaymentOption(scheme="exact", price="$0.001", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
-        ]
+        accepts=_pay_opts("$0.001"),
+        description="USDT/USDC premium on Korean exchanges vs official USD/KRW rate — fund flow indicator",
+        mime_type="application/json",
+        extensions={"bazaar": {"info": {
+            "output": {"type": "json", "example": {
+                "official_fx_rate": 1475.27,
+                "fx_source": "exchangerate-api.com",
+                "stablecoins": {
+                    "usdt": {"price_krw": 1478, "premium_percent": 0.19, "premium_direction": "positive", "volume_24h": 50000000},
+                    "usdc": {"price_krw": 1477, "premium_percent": 0.12, "premium_direction": "positive", "volume_24h": 30000000},
+                },
+                "interpretation": {"positive_premium": "Capital flowing INTO Korean crypto market", "negative_premium": "Capital flowing OUT of Korean crypto market"},
+                "timestamp": 1776340000000,
+            }},
+        }}},
     ),
     "GET /api/v1/arbitrage-scanner": RouteConfig(
-        accepts=[
-            PaymentOption(scheme="exact", price="$0.01", network="eip155:8453", pay_to=WALLET_ADDRESS),
-            PaymentOption(scheme="exact", price="$0.01", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
-        ]
+        accepts=_pay_opts("$0.01"),
+        description="Token-by-token Kimchi Premium for 189+ tokens, reverse premium, Upbit-Bithumb gaps, market share",
+        mime_type="application/json",
+        extensions={"bazaar": {"info": {
+            "output": {"type": "json", "example": {
+                "premiums": [{"symbol": "BTC", "korean_name": "비트코인", "upbit_krw": 142000000, "binance_usd": 95200, "global_krw": 140453000, "premium_pct": 1.1, "warning": False, "caution_volume_soaring": False, "caution_deposit_soaring": False, "upbit_volume_krw": 500000000000}],
+                "reverse_premiums": [{"symbol": "SNT", "premium_pct": -63.8}],
+                "exchange_gaps": [{"symbol": "ETH", "upbit_krw": 3000000, "bithumb_krw": 3009000, "gap_pct": 0.3}],
+                "market_share": {"upbit_pct": 78.5, "bithumb_pct": 21.5, "upbit_volume_krw": 1500000000000, "bithumb_volume_krw": 410000000000},
+                "common_symbols_count": 189,
+                "fx_rate": 1475.27,
+                "meta": {"price": "$0.01", "update_interval": "60s"},
+            }},
+        }}},
     ),
     "GET /api/v1/exchange-alerts": RouteConfig(
-        accepts=[
-            PaymentOption(scheme="exact", price="$0.01", network="eip155:8453", pay_to=WALLET_ADDRESS),
-            PaymentOption(scheme="exact", price="$0.01", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
-        ]
+        accepts=_pay_opts("$0.01"),
+        description="Korean exchange alerts: new listings, delistings, investment warnings, caution flags",
+        mime_type="application/json",
+        extensions={"bazaar": {"info": {
+            "output": {"type": "json", "example": {
+                "listing_changes": [{"symbol": "NEWTOKEN", "type": "NEW_LISTING", "korean_name": "뉴토큰", "detected_at": "2026-04-23T12:00:00Z"}],
+                "caution_tokens": [{"symbol": "RISK", "korean_name": "위험종목", "flags": ["INVESTMENT_WARNING", "VOLUME_SOARING"]}],
+                "meta": {"price": "$0.01", "update_interval": "60s"},
+            }},
+        }}},
     ),
     "GET /api/v1/market-movers": RouteConfig(
-        accepts=[
-            PaymentOption(scheme="exact", price="$0.01", network="eip155:8453", pay_to=WALLET_ADDRESS),
-            PaymentOption(scheme="exact", price="$0.01", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
-        ]
+        accepts=_pay_opts("$0.01"),
+        description="1-minute price surges/crashes, volume spikes, top 20 tokens by volume on Korean exchanges",
+        mime_type="application/json",
+        extensions={"bazaar": {"info": {
+            "output": {"type": "json", "example": {
+                "movers_1m": [{"symbol": "SHIB", "prev_price": 1000, "curr_price": 1015, "change_1m_pct": 1.5, "volume_krw": 50000000000}],
+                "volume_spikes": [{"symbol": "WET", "volume_krw": 80000000000, "change_rate_24h": 3.5}],
+                "top_volume": [{"symbol": "BTC", "volume_krw": 500000000000, "change_rate": 0.02}],
+                "meta": {"price": "$0.01", "update_interval": "60s"},
+            }},
+        }}},
     ),
     "GET /api/v1/market-read": RouteConfig(
-        accepts=[
-            PaymentOption(scheme="exact", price="$0.1", network="eip155:8453", pay_to=WALLET_ADDRESS),
-            PaymentOption(scheme="exact", price="$0.1", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
-        ]
+        accepts=_pay_opts("$0.1"),
+        description="AI-powered Korean crypto market analysis — 12+ data sources + exchange intelligence + Claude AI token-level signals",
+        mime_type="application/json",
+        extensions={"bazaar": {"info": {
+            "output": {"type": "json", "example": {
+                "signal": "BULLISH",
+                "confidence": "7/10",
+                "summary": "Korean market showing strong inflow signals with 1.1% average kimchi premium and rising stablecoin demand.",
+                "key_factors": ["BTC kimchi premium at 1.1%", "USDT premium positive at 0.19%", "Fear & Greed at 65 (Greed)", "Funding rate positive suggesting long bias"],
+                "token_alerts": ["WET: volume + deposit soaring = overheated, avoid longs", "BIO: new listing momentum, high volume"],
+                "risk_warning": "Elevated leverage in BTC futures with open interest at $12.5B.",
+                "data": {"korean_market": {}, "global_market": {}, "exchange_intelligence": {}},
+                "meta": {"price": "$0.10", "data_sources": ["upbit", "bithumb", "binance_futures", "coingecko", "alternative.me", "exchange_intelligence(180+tokens)"], "ai_model": "claude-haiku-4.5"},
+                "timestamp": 1776340000000,
+            }},
+        }}},
     ),
     "GET /api/v1/kr-sentiment": RouteConfig(
-        accepts=[
-            PaymentOption(scheme="exact", price="$0.05", network="eip155:8453", pay_to=WALLET_ADDRESS),
-            PaymentOption(scheme="exact", price="$0.05", network=SOLANA_NETWORK, pay_to=SOLANA_WALLET),
-        ]
+        accepts=_pay_opts("$0.05"),
+        description="Korean crypto sentiment — AI analysis combining 189+ tokens exchange data with Korean news. First-in-world Korean-to-English crypto sentiment API.",
+        mime_type="application/json",
+        extensions={"bazaar": {"info": {
+            "output": {"type": "json", "example": {
+                "sentiment": "CAUTIOUS_FOMO",
+                "score": 0.4,
+                "report_en": "Korean retail showing mixed signals with extreme reverse premiums on select tokens while deposit activity surges for mid-cap altcoins. Coinness reports increased institutional interest following regulatory clarity.",
+                "exchange_signals": {
+                    "deposit_soaring": ["BIO", "ARKM", "HYPER"],
+                    "volume_soaring": ["BIO", "ERA", "IN"],
+                    "warnings": 2,
+                    "avg_premium_pct": 0.3,
+                    "extreme_premium_tokens": [{"symbol": "SNT", "premium_pct": -63.8}],
+                },
+                "news_context": {
+                    "korean_related": [{"title": "업비트 신규 상장...", "timestamp": "2026-04-23T10:00:00Z"}],
+                    "total_analyzed": 20,
+                    "korean_count": 8,
+                    "news_freshness_hours": 6,
+                },
+                "sources": ["Upbit API (189 tokens, real-time)", "Bithumb API (real-time)", "Binance API (reference)", "Coinness Telegram (20 articles analyzed, 8 Korean-related)"],
+                "timestamp": "2026-04-23T12:00:00Z",
+                "_meta": {"cache_age_seconds": 0, "computed_at": "2026-04-23T12:00:00Z", "data_sources_status": {"exchange_intel": "ok", "coinness": "ok"}},
+            }},
+        }}},
     ),
 }
 
@@ -489,7 +608,7 @@ app.add_middleware(PaymentMiddlewareASGI, routes=x402_routes, server=x402_server
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
-    if request.url.path in ("/health", "/docs", "/openapi.json", "/", "/favicon.ico"):
+    if request.url.path in ("/health", "/docs", "/openapi.json", "/", "/favicon.ico", "/llms.txt", "/.well-known/x402"):
         return await call_next(request)
     ip = get_real_ip(request)
     if not check_rate_limit(ip):
@@ -528,20 +647,21 @@ async def x402_manifest():
     return {
         "x402Version": 2,
         "name": "KR Crypto Intelligence",
-        "description": "Korean crypto market data + AI analysis for AI agents. 10 endpoints, 180+ tokens. Kimchi Premium, exchange intelligence, AI market read.",
+        "description": "Korean crypto market data + AI analysis for AI agents. 11 endpoints, 189+ tokens. Kimchi Premium, exchange intelligence, AI sentiment, market read.",
         "url": "https://api.printmoneylab.com",
         "mcp": "https://mcp.printmoneylab.com/mcp",
         "source": "https://github.com/bakyang2/kr-crypto-intelligence",
+        "llms_txt": "https://api.printmoneylab.com/llms.txt",
         "endpoints": [
-            {"path": "/api/v1/kimchi-premium", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Real-time Kimchi Premium (Upbit vs Binance)"},
-            {"path": "/api/v1/kr-prices", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean exchange prices (Upbit, Bithumb)"},
-            {"path": "/api/v1/fx-rate", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "USD/KRW exchange rate"},
-            {"path": "/api/v1/stablecoin-premium", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "USDT/USDC premium on Korean exchanges (fund flow indicator)"},
-            {"path": "/api/v1/arbitrage-scanner", "method": "GET", "price": "$0.01", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Token-by-token Kimchi Premium for 180+ tokens, reverse premium, Upbit-Bithumb gaps, market share"},
-            {"path": "/api/v1/exchange-alerts", "method": "GET", "price": "$0.01", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "New listings/delistings, investment warnings, caution flags"},
-            {"path": "/api/v1/market-movers", "method": "GET", "price": "$0.01", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "1-min price surges/crashes, volume spikes, top volume tokens"},
-            {"path": "/api/v1/market-read", "method": "GET", "price": "$0.10", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "AI market analysis — 12+ data sources + exchange intelligence + Claude AI token-level signals"},
-            {"path": "/api/v1/kr-sentiment", "method": "GET", "price": "$0.05", "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean crypto sentiment — exchange intelligence + Korean news + AI analysis. First-in-world Korean-to-English crypto sentiment API"}
+            {"path": "/api/v1/kimchi-premium", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Real-time Kimchi Premium (Upbit vs Binance)"},
+            {"path": "/api/v1/kr-prices", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean exchange prices (Upbit, Bithumb)"},
+            {"path": "/api/v1/fx-rate", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "USD/KRW exchange rate"},
+            {"path": "/api/v1/stablecoin-premium", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "USDT/USDC premium on Korean exchanges (fund flow indicator)"},
+            {"path": "/api/v1/arbitrage-scanner", "method": "GET", "price": "$0.01", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Token-by-token Kimchi Premium for 189+ tokens, reverse premium, Upbit-Bithumb gaps, market share"},
+            {"path": "/api/v1/exchange-alerts", "method": "GET", "price": "$0.01", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "New listings/delistings, investment warnings, caution flags"},
+            {"path": "/api/v1/market-movers", "method": "GET", "price": "$0.01", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "1-min price surges/crashes, volume spikes, top volume tokens"},
+            {"path": "/api/v1/market-read", "method": "GET", "price": "$0.10", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "AI market analysis — 12+ data sources + exchange intelligence + Claude AI token-level signals"},
+            {"path": "/api/v1/kr-sentiment", "method": "GET", "price": "$0.05", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean crypto sentiment — exchange intelligence + Korean news + AI analysis. First-in-world Korean-to-English crypto sentiment API"}
         ],
         "free_endpoints": [
             {"path": "/api/v1/symbols", "method": "GET", "description": "Available trading symbols"},
@@ -550,10 +670,93 @@ async def x402_manifest():
         ],
         "payment": [
             {"scheme": "exact", "network": "eip155:8453", "asset": "USDC", "payTo": "0xcF9223eCe895258dEa8D288AEBcf846Ab8E342fB"},
+            {"scheme": "exact", "network": "eip155:137", "asset": "USDC", "payTo": "0xcF9223eCe895258dEa8D288AEBcf846Ab8E342fB"},
             {"scheme": "exact", "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "asset": "USDC", "payTo": "3Ywxk31SvWKwZBdY6bLvjmn5h4mzWcT3HJ5UZbYXoVy9"}
         ],
         "tags": ["korean", "crypto", "kimchi-premium", "upbit", "bithumb", "fx-rate", "market-data", "asia", "arbitrage", "exchange-intelligence", "ai-analysis"]
     }
+
+LLMS_TXT_CONTENT = """# KR Crypto Intelligence API
+
+> Korean crypto market data + AI sentiment analysis for AI agents. Pay per request via x402 on Base, Polygon, and Solana.
+> API: https://api.printmoneylab.com
+> MCP: https://mcp.printmoneylab.com/mcp
+> Docs: https://api.printmoneylab.com/docs
+> GitHub: https://github.com/bakyang2/kr-crypto-intelligence
+
+## How it works
+
+Every endpoint is callable via the x402 payment protocol.
+Your agent sends a standard HTTP request; when payment is required,
+it receives HTTP 402 with payment instructions. No API keys, no accounts,
+no registration. Payment is settled per-request in USDC.
+
+## Unique value
+
+World's first Korean-to-English crypto sentiment API. Covers 189+ tokens
+across Upbit and Bithumb (top Korean exchanges). Academic research
+(European Journal of Finance, 2026) confirms Korean news sentiment
+predicts global crypto returns.
+
+## Networks supported
+
+- Base (eip155:8453)
+- Polygon (eip155:137)
+- Solana mainnet
+
+## Endpoints
+
+### Korean Sentiment Analysis
+- GET /api/v1/kr-sentiment -> $0.05
+  World's first Korean-to-English crypto sentiment. Combines 189+ tokens
+  exchange intelligence with Korean news context for AI-powered insights.
+  1-hour cache.
+
+### AI Analysis
+- GET /api/v1/market-read -> $0.10
+  Comprehensive market analysis combining 12+ data sources with
+  Claude AI. Returns signal (BULLISH/BEARISH/NEUTRAL), confidence
+  score, token-level alerts.
+
+### Korean Exchange Intelligence
+- GET /api/v1/arbitrage-scanner -> $0.01
+  Token-by-token Kimchi Premium for 189+ tokens, reverse premium
+  detection, Upbit-Bithumb price gaps.
+- GET /api/v1/exchange-alerts -> $0.01
+  New listings/delistings, investment warnings, caution flags.
+- GET /api/v1/market-movers -> $0.01
+  1-minute price surges/crashes, volume spikes, top 20 by volume.
+
+### Market Data
+- GET /api/v1/kimchi-premium?symbol={SYMBOL} -> $0.001
+- GET /api/v1/stablecoin-premium -> $0.001
+- GET /api/v1/kr-prices?symbol={SYMBOL}&exchange={EXCHANGE} -> $0.001
+- GET /api/v1/fx-rate -> $0.001
+
+### Free
+- GET /api/v1/symbols -> free (list of tradeable symbols)
+- GET /health -> free (service health)
+
+## Discovery
+
+Our endpoints are registered in the x402 Bazaar discovery layer.
+Query all CDP-facilitated services:
+  GET https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources
+
+## MCP server
+
+Connect any MCP-compatible AI agent (Claude, Cursor, ChatGPT):
+  URL: https://mcp.printmoneylab.com/mcp
+  Transport: streamable-http
+  Tools: 11 (get_kr_sentiment, get_market_read, get_arbitrage_scanner,
+         get_exchange_alerts, get_market_movers, get_kimchi_premium,
+         get_stablecoin_premium, get_kr_prices, get_fx_rate,
+         get_available_symbols, check_health)
+"""
+
+@app.get("/llms.txt", response_class=PlainTextResponse)
+async def llms_txt():
+    return LLMS_TXT_CONTENT
 
 @app.get("/health")
 async def health():
