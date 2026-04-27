@@ -20,6 +20,11 @@ from cdp.x402 import create_facilitator_config
 from x402.http.types import RouteConfig
 from x402.server import x402ResourceServer
 from x402.mechanisms.evm.exact import ExactEvmServerScheme
+from x402.extensions.bazaar import (
+    bazaar_resource_server_extension,
+    declare_discovery_extension,
+    OutputConfig,
+)
 from x402.mechanisms.svm.exact import ExactSvmServerScheme
 
 from stats_logger import log_event, aggregate_stats, aggregate_stats_range, maybe_archive
@@ -37,8 +42,12 @@ EXCHANGE_TIMEOUT = 10
 # === 텔레그램 설정 ===
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TG_CHAT = os.getenv("TELEGRAM_CHAT_ID", "")
-tg_pending = []
-tg_last_summary = 0
+# 실시간 알림 마스터 스위치: 기본적으로 결제 성공만 전송.
+# true 로 설정 시 주기 집계/시작/이상감지 등 비결제 알림도 다시 활성화됨.
+ENABLE_REALTIME_NON_PAYMENT_ALERTS = os.getenv("ENABLE_REALTIME_NON_PAYMENT_ALERTS", "false").lower() == "true"
+
+# 결제 성공 알림 dedupe (엔드포인트+IP+분 단위). 5분 TTL.
+_payment_alert_cache = {}
 
 async def tg_send(text):
     if not TG_TOKEN or not TG_CHAT:
@@ -50,34 +59,40 @@ async def tg_send(text):
     except Exception:
         pass
 
+async def tg_send_non_payment(text):
+    """비결제 이벤트용 텔레그램 전송. ENABLE_REALTIME_NON_PAYMENT_ALERTS=false 시 no-op."""
+    if not ENABLE_REALTIME_NON_PAYMENT_ALERTS:
+        return
+    await tg_send(text)
+
 async def tg_notify_request(endpoint, symbol, ip, status_code=200):
-    global tg_last_summary, tg_pending
-    PAID_ENDPOINTS = ["/api/v1/kimchi-premium", "/api/v1/kr-prices", "/api/v1/fx-rate", "/api/v1/stablecoin-premium", "/api/v1/market-read", "/api/v1/arbitrage-scanner", "/api/v1/exchange-alerts", "/api/v1/market-movers", "/api/v1/kr-sentiment"]
-    if endpoint in PAID_ENDPOINTS and status_code < 400:
+    """요청당 1회만 호출되어야 함. 결제 성공만 즉시 알림. 비결제 집계는 플래그로만."""
+    PAID_ENDPOINTS = ["/api/v1/kimchi-premium", "/api/v1/kr-prices", "/api/v1/fx-rate", "/api/v1/stablecoin-premium", "/api/v1/market-read", "/api/v1/arbitrage-scanner", "/api/v1/exchange-alerts", "/api/v1/market-movers", "/api/v1/kr-sentiment", "/api/v1/global-vs-korea-divergence", "/api/v1/global-vs-korea-divergence-deep"]
+    if endpoint in PAID_ENDPOINTS and status_code == 200:
+        # 5분 dedupe (같은 IP+endpoint 1회만)
+        now = time.time()
+        # 만료된 엔트리 청소
+        expired = [k for k, ts in _payment_alert_cache.items() if now - ts > 300]
+        for k in expired:
+            del _payment_alert_cache[k]
+        dedupe_key = f"{endpoint}:{ip}"
+        if dedupe_key in _payment_alert_cache:
+            return  # 5분 내 중복 억제
+        _payment_alert_cache[dedupe_key] = now
+
         price_map = {
             "/api/v1/market-read": "$0.10",
             "/api/v1/kr-sentiment": "$0.05",
             "/api/v1/arbitrage-scanner": "$0.01",
             "/api/v1/exchange-alerts": "$0.01",
             "/api/v1/market-movers": "$0.01",
+            "/api/v1/global-vs-korea-divergence": "$0.05",
+            "/api/v1/global-vs-korea-divergence-deep": "$0.10",
         }
         price = price_map.get(endpoint, "$0.001")
         await tg_send(f"💰 유료 결제 성공!\n엔드포인트: {endpoint}\n가격: {price}\nIP: {ip}\n시간: {time.strftime('%H:%M:%S')}")
-    tg_pending.append({"endpoint": endpoint, "ip": ip, "time": time.strftime("%H:%M:%S"), "ok": status_code < 400})
-    now = time.time()
-    if now - tg_last_summary >= 60 and tg_pending:
-        count = len(tg_pending)
-        eps = {}
-        for r in tg_pending:
-            eps[r["endpoint"]] = eps.get(r["endpoint"], 0) + 1
-        summary = "\n".join([f"  {k}: {v}" for k, v in eps.items()])
-        ips = len(set(r["ip"] for r in tg_pending))
-        ok_count = sum(1 for r in tg_pending if r.get("ok"))
-        fail_count = count - ok_count
-        status_line = f"✅ {ok_count}건 성공" + (f" | ❌ {fail_count}건 실패" if fail_count else "")
-        await tg_send(f"📊 <b>최근 요청</b>\n{status_line} | IP {ips}개\n{summary}")
-        tg_pending.clear()
-        tg_last_summary = now
+    # 주기 집계 알림(📊 최근 요청)은 ENABLE_REALTIME_NON_PAYMENT_ALERTS=false 일 때 비활성화
+    # 집계 자체는 stats_logger로 계속 수집되어 일일 요약에서 사용됨
 
 # === 전역 상태 ===
 cache = {}
@@ -346,11 +361,14 @@ async def periodic_stats_save():
         save_stats()
 
 async def daily_summary_task():
-    """Legacy daily summary (simple stats)"""
+    """Legacy daily summary (simple stats). daily_report_task 와 중복되므로 비활성화됨.
+    복구 시 ENABLE_REALTIME_NON_PAYMENT_ALERTS=true 로 설정."""
     while True:
         now = time.localtime()
         seconds_until_midnight = (23 - now.tm_hour) * 3600 + (59 - now.tm_min) * 60 + (59 - now.tm_sec)
         await asyncio.sleep(seconds_until_midnight + 1)
+        if not ENABLE_REALTIME_NON_PAYMENT_ALERTS:
+            continue  # daily_report_task 가 09:00 KST에 상세 리포트 발송함
         await tg_send(
             f"📈 <b>일일 요약</b> ({stats.get('today_date', '')})\n"
             f"오늘 요청: {stats.get('today_requests', 0)}건\n"
@@ -359,18 +377,25 @@ async def daily_summary_task():
         )
 
 async def daily_report_task():
-    """매일 KST 자정 (UTC 15:00)에 전일 상세 리포트 전송"""
+    """매일 KST 09:00 (UTC 00:00)에 전일(KST 00:00~24:00) 상세 리포트 전송.
+    이것은 결제 이외 알림 중 유일하게 살아있는 것 — 플래그 영향 받지 않음."""
     while True:
         try:
             now_kst = datetime.now(timezone(timedelta(hours=9)))
-            next_midnight = (now_kst + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-            wait_seconds = (next_midnight - now_kst).total_seconds()
+            # 다음 KST 09:00 계산 (현재가 09:00 전이면 오늘 09:00, 아니면 내일 09:00)
+            next_9am = now_kst.replace(hour=9, minute=0, second=0, microsecond=0)
+            if now_kst >= next_9am:
+                next_9am += timedelta(days=1)
+            wait_seconds = (next_9am - now_kst).total_seconds()
             await asyncio.sleep(wait_seconds)
 
-            yesterday_start = int((next_midnight - timedelta(days=1)).timestamp())
-            yesterday_end = int(next_midnight.timestamp())
+            # 전일 KST 00:00~24:00 구간 집계
+            yesterday_midnight_kst = (next_9am.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1))
+            today_midnight_kst = yesterday_midnight_kst + timedelta(days=1)
+            yesterday_start = int(yesterday_midnight_kst.timestamp())
+            yesterday_end = int(today_midnight_kst.timestamp())
             s = aggregate_stats_range(yesterday_start, yesterday_end)
-            date_str = (next_midnight - timedelta(days=1)).strftime("%Y-%m-%d")
+            date_str = yesterday_midnight_kst.strftime("%Y-%m-%d")
 
             profit = s["revenue_usd"] - s["claude_cost_usd"]
             msg = (
@@ -395,16 +420,20 @@ async def daily_report_task():
 async def lifespan(app):
     load_stats()
     load_sentiment_cache()
-    await tg_send("🟢 <b>KR Crypto API</b> 서버 시작됨\nhttps://api.printmoneylab.com/health")
+    # 서버 시작 알림은 비결제 이벤트 — 플래그로 게이트
+    await tg_send_non_payment("🟢 <b>KR Crypto API</b> 서버 시작됨\nhttps://api.printmoneylab.com/health")
     task1 = asyncio.create_task(periodic_stats_save())
     asyncio.create_task(intel_polling_task(fetch_fx_rate, tg_func=tg_send))
     asyncio.create_task(tg_bot_polling(TG_TOKEN, TG_CHAT))
     task2 = asyncio.create_task(daily_summary_task())
     task3 = asyncio.create_task(daily_report_task())
+    # Coinness 뉴스 캐시 5분 주기 갱신 — divergence deep 응답 시간 단축용
+    task4 = asyncio.create_task(coinness_news_poller())
     yield
     task1.cancel()
     task2.cancel()
     task3.cancel()
+    task4.cancel()
     save_stats()
 
 # === x402 결제 설정 ===
@@ -421,6 +450,7 @@ x402_server = x402ResourceServer(
 x402_server.register("eip155:8453", ExactEvmServerScheme())
 x402_server.register("eip155:137", ExactEvmServerScheme())
 x402_server.register("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", ExactSvmServerScheme())
+x402_server.register_extension(bazaar_resource_server_extension)
 
 # Helper: create PaymentOption list for a given price (Base + Polygon + Solana)
 def _pay_opts(price: str):
@@ -435,164 +465,292 @@ x402_routes = {
         accepts=_pay_opts("$0.001"),
         description="Real-time Kimchi Premium for a single token (Upbit vs Binance via FX rate)",
         mime_type="application/json",
-        extensions={"bazaar": {"info": {
-            "input": {"query_params": {"symbol": "BTC"}},
-            "input_schema": {
-                "type": "object",
-                "properties": {"symbol": {"type": "string", "description": "Crypto symbol (e.g., BTC, ETH, XRP)"}},
+        extensions=declare_discovery_extension(
+            input={"symbol": "BTC"},
+            input_schema={
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Crypto symbol (e.g., BTC, ETH, XRP)",
+                    }
+                },
                 "required": ["symbol"],
             },
-            "output": {"type": "json", "example": {
-                "symbol": "BTC",
-                "upbit_krw": 142000000,
-                "binance_usdt": 95200.5,
-                "fx_rate": 1475.27,
-                "fx_source": "exchangerate-api.com",
-                "binance_krw_equivalent": 140453370,
-                "premium_percent": 1.1,
-                "premium_direction": "positive",
-                "timestamp": 1776340000000,
-            }},
-        }}},
+            output=OutputConfig(
+                example={
+                    "symbol": "BTC",
+                    "upbit_krw": 142000000,
+                    "binance_usdt": 95200.5,
+                    "fx_rate": 1475.27,
+                    "fx_source": "exchangerate-api.com",
+                    "binance_krw_equivalent": 140453370,
+                    "premium_percent": 1.1,
+                    "premium_direction": "positive",
+                    "timestamp": 1776340000000,
+                }
+            ),
+        ),
     ),
     "GET /api/v1/kr-prices": RouteConfig(
         accepts=_pay_opts("$0.001"),
         description="Korean exchange prices (Upbit, Bithumb) for a single token in KRW",
         mime_type="application/json",
-        extensions={"bazaar": {"info": {
-            "input": {"query_params": {"symbol": "BTC", "exchange": "all"}},
-            "input_schema": {
-                "type": "object",
+        extensions=declare_discovery_extension(
+            input={"symbol": "BTC", "exchange": "all"},
+            input_schema={
                 "properties": {
-                    "symbol": {"type": "string", "description": "Crypto symbol (e.g., BTC, ETH)"},
-                    "exchange": {"type": "string", "enum": ["upbit", "bithumb", "all"], "description": "Exchange to query"},
+                    "symbol": {
+                        "type": "string",
+                        "description": "Crypto symbol (e.g., BTC, ETH)",
+                    },
+                    "exchange": {
+                        "type": "string",
+                        "enum": ["upbit", "bithumb", "all"],
+                        "description": "Exchange to query",
+                    },
                 },
                 "required": ["symbol"],
             },
-            "output": {"type": "json", "example": {
-                "symbol": "BTC",
-                "data": {
-                    "upbit": {"exchange": "upbit", "symbol": "BTC", "price_krw": 142000000, "volume_24h": 1234567.89, "change_rate": 0.02, "data_age_seconds": 0},
-                    "bithumb": {"exchange": "bithumb", "symbol": "BTC", "price_krw": 141950000, "volume_24h": 987654.32, "change_rate": 0.019, "data_age_seconds": 0},
-                },
-                "timestamp": 1776340000000,
-            }},
-        }}},
+            output=OutputConfig(
+                example={
+                    "symbol": "BTC",
+                    "data": {
+                        "upbit": {"exchange": "upbit", "symbol": "BTC", "price_krw": 142000000, "volume_24h": 1234567.89, "change_rate": 0.02, "data_age_seconds": 0},
+                        "bithumb": {"exchange": "bithumb", "symbol": "BTC", "price_krw": 141950000, "volume_24h": 987654.32, "change_rate": 0.019, "data_age_seconds": 0},
+                    },
+                    "timestamp": 1776340000000,
+                }
+            ),
+        ),
     ),
     "GET /api/v1/fx-rate": RouteConfig(
         accepts=_pay_opts("$0.001"),
         description="Current USD/KRW foreign exchange rate",
         mime_type="application/json",
-        extensions={"bazaar": {"info": {
-            "output": {"type": "json", "example": {
-                "base": "USD", "quote": "KRW", "rate": 1475.27,
-                "source": "exchangerate-api.com", "timestamp": 1776340000000, "data_age_seconds": 0,
-            }},
-        }}},
+        extensions=declare_discovery_extension(
+            output=OutputConfig(
+                example={
+                    "base": "USD", "quote": "KRW", "rate": 1475.27,
+                    "source": "exchangerate-api.com", "timestamp": 1776340000000, "data_age_seconds": 0,
+                }
+            ),
+        ),
     ),
     "GET /api/v1/stablecoin-premium": RouteConfig(
         accepts=_pay_opts("$0.001"),
         description="USDT/USDC premium on Korean exchanges vs official USD/KRW rate — fund flow indicator",
         mime_type="application/json",
-        extensions={"bazaar": {"info": {
-            "output": {"type": "json", "example": {
-                "official_fx_rate": 1475.27,
-                "fx_source": "exchangerate-api.com",
-                "stablecoins": {
-                    "usdt": {"price_krw": 1478, "premium_percent": 0.19, "premium_direction": "positive", "volume_24h": 50000000},
-                    "usdc": {"price_krw": 1477, "premium_percent": 0.12, "premium_direction": "positive", "volume_24h": 30000000},
-                },
-                "interpretation": {"positive_premium": "Capital flowing INTO Korean crypto market", "negative_premium": "Capital flowing OUT of Korean crypto market"},
-                "timestamp": 1776340000000,
-            }},
-        }}},
+        extensions=declare_discovery_extension(
+            output=OutputConfig(
+                example={
+                    "official_fx_rate": 1475.27,
+                    "fx_source": "exchangerate-api.com",
+                    "stablecoins": {
+                        "usdt": {"price_krw": 1478, "premium_percent": 0.19, "premium_direction": "positive", "volume_24h": 50000000},
+                        "usdc": {"price_krw": 1477, "premium_percent": 0.12, "premium_direction": "positive", "volume_24h": 30000000},
+                    },
+                    "interpretation": {"positive_premium": "Capital flowing INTO Korean crypto market", "negative_premium": "Capital flowing OUT of Korean crypto market"},
+                    "timestamp": 1776340000000,
+                }
+            ),
+        ),
     ),
     "GET /api/v1/arbitrage-scanner": RouteConfig(
         accepts=_pay_opts("$0.01"),
         description="Token-by-token Kimchi Premium for 189+ tokens, reverse premium, Upbit-Bithumb gaps, market share",
         mime_type="application/json",
-        extensions={"bazaar": {"info": {
-            "output": {"type": "json", "example": {
-                "premiums": [{"symbol": "BTC", "korean_name": "비트코인", "upbit_krw": 142000000, "binance_usd": 95200, "global_krw": 140453000, "premium_pct": 1.1, "warning": False, "caution_volume_soaring": False, "caution_deposit_soaring": False, "upbit_volume_krw": 500000000000}],
-                "reverse_premiums": [{"symbol": "SNT", "premium_pct": -63.8}],
-                "exchange_gaps": [{"symbol": "ETH", "upbit_krw": 3000000, "bithumb_krw": 3009000, "gap_pct": 0.3}],
-                "market_share": {"upbit_pct": 78.5, "bithumb_pct": 21.5, "upbit_volume_krw": 1500000000000, "bithumb_volume_krw": 410000000000},
-                "common_symbols_count": 189,
-                "fx_rate": 1475.27,
-                "meta": {"price": "$0.01", "update_interval": "60s"},
-            }},
-        }}},
+        extensions=declare_discovery_extension(
+            output=OutputConfig(
+                example={
+                    "premiums": [{"symbol": "BTC", "korean_name": "비트코인", "upbit_krw": 142000000, "binance_usd": 95200, "global_krw": 140453000, "premium_pct": 1.1, "warning": False, "caution_volume_soaring": False, "caution_deposit_soaring": False, "upbit_volume_krw": 500000000000}],
+                    "reverse_premiums": [{"symbol": "SNT", "premium_pct": -63.8}],
+                    "exchange_gaps": [{"symbol": "ETH", "upbit_krw": 3000000, "bithumb_krw": 3009000, "gap_pct": 0.3}],
+                    "market_share": {"upbit_pct": 78.5, "bithumb_pct": 21.5, "upbit_volume_krw": 1500000000000, "bithumb_volume_krw": 410000000000},
+                    "common_symbols_count": 189,
+                    "fx_rate": 1475.27,
+                    "meta": {"price": "$0.01", "update_interval": "60s"},
+                }
+            ),
+        ),
     ),
     "GET /api/v1/exchange-alerts": RouteConfig(
         accepts=_pay_opts("$0.01"),
         description="Korean exchange alerts: new listings, delistings, investment warnings, caution flags",
         mime_type="application/json",
-        extensions={"bazaar": {"info": {
-            "output": {"type": "json", "example": {
-                "listing_changes": [{"symbol": "NEWTOKEN", "type": "NEW_LISTING", "korean_name": "뉴토큰", "detected_at": "2026-04-23T12:00:00Z"}],
-                "caution_tokens": [{"symbol": "RISK", "korean_name": "위험종목", "flags": ["INVESTMENT_WARNING", "VOLUME_SOARING"]}],
-                "meta": {"price": "$0.01", "update_interval": "60s"},
-            }},
-        }}},
+        extensions=declare_discovery_extension(
+            output=OutputConfig(
+                example={
+                    "listing_changes": [{"symbol": "NEWTOKEN", "type": "NEW_LISTING", "korean_name": "뉴토큰", "detected_at": "2026-04-23T12:00:00Z"}],
+                    "caution_tokens": [{"symbol": "RISK", "korean_name": "위험종목", "flags": ["INVESTMENT_WARNING", "VOLUME_SOARING"]}],
+                    "meta": {"price": "$0.01", "update_interval": "60s"},
+                }
+            ),
+        ),
     ),
     "GET /api/v1/market-movers": RouteConfig(
         accepts=_pay_opts("$0.01"),
         description="1-minute price surges/crashes, volume spikes, top 20 tokens by volume on Korean exchanges",
         mime_type="application/json",
-        extensions={"bazaar": {"info": {
-            "output": {"type": "json", "example": {
-                "movers_1m": [{"symbol": "SHIB", "prev_price": 1000, "curr_price": 1015, "change_1m_pct": 1.5, "volume_krw": 50000000000}],
-                "volume_spikes": [{"symbol": "WET", "volume_krw": 80000000000, "change_rate_24h": 3.5}],
-                "top_volume": [{"symbol": "BTC", "volume_krw": 500000000000, "change_rate": 0.02}],
-                "meta": {"price": "$0.01", "update_interval": "60s"},
-            }},
-        }}},
+        extensions=declare_discovery_extension(
+            output=OutputConfig(
+                example={
+                    "movers_1m": [{"symbol": "SHIB", "prev_price": 1000, "curr_price": 1015, "change_1m_pct": 1.5, "volume_krw": 50000000000}],
+                    "volume_spikes": [{"symbol": "WET", "volume_krw": 80000000000, "change_rate_24h": 3.5}],
+                    "top_volume": [{"symbol": "BTC", "volume_krw": 500000000000, "change_rate": 0.02}],
+                    "meta": {"price": "$0.01", "update_interval": "60s"},
+                }
+            ),
+        ),
     ),
     "GET /api/v1/market-read": RouteConfig(
         accepts=_pay_opts("$0.1"),
         description="AI-powered Korean crypto market analysis — 12+ data sources + exchange intelligence + Claude AI token-level signals",
         mime_type="application/json",
-        extensions={"bazaar": {"info": {
-            "output": {"type": "json", "example": {
-                "signal": "BULLISH",
-                "confidence": "7/10",
-                "summary": "Korean market showing strong inflow signals with 1.1% average kimchi premium and rising stablecoin demand.",
-                "key_factors": ["BTC kimchi premium at 1.1%", "USDT premium positive at 0.19%", "Fear & Greed at 65 (Greed)", "Funding rate positive suggesting long bias"],
-                "token_alerts": ["WET: volume + deposit soaring = overheated, avoid longs", "BIO: new listing momentum, high volume"],
-                "risk_warning": "Elevated leverage in BTC futures with open interest at $12.5B.",
-                "data": {"korean_market": {}, "global_market": {}, "exchange_intelligence": {}},
-                "meta": {"price": "$0.10", "data_sources": ["upbit", "bithumb", "binance_futures", "coingecko", "alternative.me", "exchange_intelligence(180+tokens)"], "ai_model": "claude-haiku-4.5"},
-                "timestamp": 1776340000000,
-            }},
-        }}},
+        extensions=declare_discovery_extension(
+            output=OutputConfig(
+                example={
+                    "signal": "BULLISH",
+                    "confidence": "7/10",
+                    "summary": "Korean market showing strong inflow signals with 1.1% average kimchi premium and rising stablecoin demand.",
+                    "key_factors": ["BTC kimchi premium at 1.1%", "USDT premium positive at 0.19%", "Fear & Greed at 65 (Greed)", "Funding rate positive suggesting long bias"],
+                    "token_alerts": ["WET: volume + deposit soaring = overheated, avoid longs", "BIO: new listing momentum, high volume"],
+                    "risk_warning": "Elevated leverage in BTC futures with open interest at $12.5B.",
+                    "data": {"korean_market": {}, "global_market": {}, "exchange_intelligence": {}},
+                    "meta": {"price": "$0.10", "data_sources": ["upbit", "bithumb", "binance_futures", "coingecko", "alternative.me", "exchange_intelligence(180+tokens)"], "ai_model": "claude-haiku-4.5"},
+                    "timestamp": 1776340000000,
+                }
+            ),
+        ),
     ),
     "GET /api/v1/kr-sentiment": RouteConfig(
         accepts=_pay_opts("$0.05"),
         description="Korean crypto sentiment — AI analysis combining 189+ tokens exchange data with Korean news. First-in-world Korean-to-English crypto sentiment API.",
         mime_type="application/json",
-        extensions={"bazaar": {"info": {
-            "output": {"type": "json", "example": {
-                "sentiment": "CAUTIOUS_FOMO",
-                "score": 0.4,
-                "report_en": "Korean retail showing mixed signals with extreme reverse premiums on select tokens while deposit activity surges for mid-cap altcoins. Coinness reports increased institutional interest following regulatory clarity.",
-                "exchange_signals": {
-                    "deposit_soaring": ["BIO", "ARKM", "HYPER"],
-                    "volume_soaring": ["BIO", "ERA", "IN"],
-                    "warnings": 2,
-                    "avg_premium_pct": 0.3,
-                    "extreme_premium_tokens": [{"symbol": "SNT", "premium_pct": -63.8}],
+        extensions=declare_discovery_extension(
+            output=OutputConfig(
+                example={
+                    "sentiment": "CAUTIOUS_FOMO",
+                    "score": 0.4,
+                    "report_en": "Korean retail showing mixed signals with extreme reverse premiums on select tokens while deposit activity surges for mid-cap altcoins. Coinness reports increased institutional interest following regulatory clarity.",
+                    "exchange_signals": {
+                        "deposit_soaring": ["BIO", "ARKM", "HYPER"],
+                        "volume_soaring": ["BIO", "ERA", "IN"],
+                        "warnings": 2,
+                        "avg_premium_pct": 0.3,
+                        "extreme_premium_tokens": [{"symbol": "SNT", "premium_pct": -63.8}],
+                    },
+                    "news_context": {
+                        "korean_related": [{"title": "업비트 신규 상장...", "timestamp": "2026-04-23T10:00:00Z"}],
+                        "total_analyzed": 20,
+                        "korean_count": 8,
+                        "news_freshness_hours": 6,
+                    },
+                    "sources": ["Upbit API (189 tokens, real-time)", "Bithumb API (real-time)", "Binance API (reference)", "Coinness Telegram (20 articles analyzed, 8 Korean-related)"],
+                    "timestamp": "2026-04-23T12:00:00Z",
+                    "_meta": {"cache_age_seconds": 0, "computed_at": "2026-04-23T12:00:00Z", "data_sources_status": {"exchange_intel": "ok", "coinness": "ok"}},
+                }
+            ),
+        ),
+    ),
+    "GET /api/v1/global-vs-korea-divergence": RouteConfig(
+        # Light tier — divergence + 1-2 sentence AI summary. ~60s cache.
+        accepts=_pay_opts("$0.05"),
+        description="Global vs Korea divergence (light tier) — CoinGecko global price + Korean exchange + 1-2 sentence AI summary. For deeper analysis with Korean news signals and structured AI breakdown, use /api/v1/global-vs-korea-divergence-deep ($0.10).",
+        mime_type="application/json",
+        extensions=declare_discovery_extension(
+            input={"symbol": "BTC"},
+            input_schema={
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Crypto symbol (BTC, ETH, XRP, SOL, ADA, DOGE, DOT, MATIC, LINK, AVAX, ATOM, UNI, LTC, NEAR, OP, ARB, APT, ALGO, FTM, SUI, TRX, BCH, ETC, HBAR, SHIB)",
+                    },
                 },
-                "news_context": {
-                    "korean_related": [{"title": "업비트 신규 상장...", "timestamp": "2026-04-23T10:00:00Z"}],
-                    "total_analyzed": 20,
-                    "korean_count": 8,
-                    "news_freshness_hours": 6,
+                "required": ["symbol"],
+            },
+            output=OutputConfig(
+                example={
+                    "symbol": "BTC",
+                    "korean_name": "비트코인",
+                    "timestamp": 1777040000000,
+                    "prices": {
+                        "global_usd": 95200.50,
+                        "global_source": "CoinGecko",
+                        "korea_krw": 142000000,
+                        "korea_source": "Upbit",
+                        "fx_rate": 1481.45,
+                        "fx_source": "exchangerate-api.com",
+                    },
+                    "divergence": {
+                        "korea_implied_usd": 95850.00,
+                        "premium_pct": 0.68,
+                        "direction": "positive",
+                        "magnitude": "small",
+                    },
+                    "context_signals": {
+                        "investment_warning": False,
+                        "volume_spike_24h": False,
+                        "global_volume_change_pct": 12.3,
+                    },
+                    "ai_interpretation": "Korean market shows a small positive premium of 0.68% over global pricing with no active investment warning, suggesting modest local demand without overheating signals.",
+                    "data_age_seconds": 0,
+                    "depth": "light",
+                }
+            ),
+        ),
+    ),
+    "GET /api/v1/global-vs-korea-divergence-deep": RouteConfig(
+        # Deep tier — light data + Korean news signal + structured AI analysis. ~5min cache.
+        accepts=_pay_opts("$0.10"),
+        description="Global vs Korea divergence (deep tier) — light response + Korean news signals (Coinness Telegram, 24h window) + structured AI analysis (drivers, global context, action suggestion, confidence). For lighter/cheaper analysis, use /api/v1/global-vs-korea-divergence ($0.05).",
+        mime_type="application/json",
+        extensions=declare_discovery_extension(
+            input={"symbol": "BTC"},
+            input_schema={
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Crypto symbol (BTC, ETH, XRP, SOL, ADA, DOGE, DOT, MATIC, LINK, AVAX, ATOM, UNI, LTC, NEAR, OP, ARB, APT, ALGO, FTM, SUI, TRX, BCH, ETC, HBAR, SHIB)",
+                    },
                 },
-                "sources": ["Upbit API (189 tokens, real-time)", "Bithumb API (real-time)", "Binance API (reference)", "Coinness Telegram (20 articles analyzed, 8 Korean-related)"],
-                "timestamp": "2026-04-23T12:00:00Z",
-                "_meta": {"cache_age_seconds": 0, "computed_at": "2026-04-23T12:00:00Z", "data_sources_status": {"exchange_intel": "ok", "coinness": "ok"}},
-            }},
-        }}},
+                "required": ["symbol"],
+            },
+            output=OutputConfig(
+                example={
+                    "symbol": "BTC",
+                    "korean_name": "비트코인",
+                    "timestamp": 1777040000000,
+                    "prices": {
+                        "global_usd": 95200.50, "global_source": "CoinGecko",
+                        "korea_krw": 142000000, "korea_source": "Upbit",
+                        "fx_rate": 1481.45, "fx_source": "exchangerate-api.com",
+                    },
+                    "divergence": {
+                        "korea_implied_usd": 95850.00, "premium_pct": 0.68,
+                        "direction": "positive", "magnitude": "small",
+                    },
+                    "context_signals": {
+                        "investment_warning": False, "volume_spike_24h": False,
+                        "global_volume_change_pct": 12.3,
+                    },
+                    "recent_news_signal": {
+                        "korean_news_count_24h": 4,
+                        "sentiment_score": 0.6,
+                        "top_keywords": ["BTC", "달러", "선물"],
+                        "source": "Coinness Telegram",
+                    },
+                    "ai_deep_analysis": {
+                        "summary": "BTC shows a modest positive Korea premium with steady but not elevated market attention.",
+                        "korean_market_drivers": ["Dollar strength considerations", "Futures market activity", "Stable positive sentiment"],
+                        "global_context": "BTC tracking global trends without significant divergence.",
+                        "implied_action_suggestion": "Premium is modest; insufficient signal alone for directional bias.",
+                        "confidence": "medium",
+                    },
+                    "data_age_seconds": 0,
+                    "depth": "deep",
+                }
+            ),
+        ),
     ),
 }
 
@@ -647,7 +805,7 @@ async def x402_manifest():
     return {
         "x402Version": 2,
         "name": "KR Crypto Intelligence",
-        "description": "Korean crypto market data + AI analysis for AI agents. 11 endpoints, 189+ tokens. Kimchi Premium, exchange intelligence, AI sentiment, market read.",
+        "description": "Korean crypto market data + AI analysis for AI agents. 13 endpoints, 189+ tokens. Kimchi Premium, exchange intelligence, AI sentiment, divergence analysis (light/deep), market read.",
         "url": "https://api.printmoneylab.com",
         "mcp": "https://mcp.printmoneylab.com/mcp",
         "source": "https://github.com/bakyang2/kr-crypto-intelligence",
@@ -661,7 +819,9 @@ async def x402_manifest():
             {"path": "/api/v1/exchange-alerts", "method": "GET", "price": "$0.01", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "New listings/delistings, investment warnings, caution flags"},
             {"path": "/api/v1/market-movers", "method": "GET", "price": "$0.01", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "1-min price surges/crashes, volume spikes, top volume tokens"},
             {"path": "/api/v1/market-read", "method": "GET", "price": "$0.10", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "AI market analysis — 12+ data sources + exchange intelligence + Claude AI token-level signals"},
-            {"path": "/api/v1/kr-sentiment", "method": "GET", "price": "$0.05", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean crypto sentiment — exchange intelligence + Korean news + AI analysis. First-in-world Korean-to-English crypto sentiment API"}
+            {"path": "/api/v1/kr-sentiment", "method": "GET", "price": "$0.05", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean crypto sentiment — exchange intelligence + Korean news + AI analysis. First-in-world Korean-to-English crypto sentiment API"},
+            {"path": "/api/v1/global-vs-korea-divergence", "method": "GET", "price": "$0.05", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Global vs Korea price divergence (light) — CoinGecko global price + Korean exchange + 1-2 sentence AI summary"},
+            {"path": "/api/v1/global-vs-korea-divergence-deep", "method": "GET", "price": "$0.10", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Global vs Korea price divergence (deep) — light response + Korean news signals (Coinness Telegram) + structured AI analysis"}
         ],
         "free_endpoints": [
             {"path": "/api/v1/symbols", "method": "GET", "description": "Available trading symbols"},
@@ -673,7 +833,7 @@ async def x402_manifest():
             {"scheme": "exact", "network": "eip155:137", "asset": "USDC", "payTo": "0xcF9223eCe895258dEa8D288AEBcf846Ab8E342fB"},
             {"scheme": "exact", "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "asset": "USDC", "payTo": "3Ywxk31SvWKwZBdY6bLvjmn5h4mzWcT3HJ5UZbYXoVy9"}
         ],
-        "tags": ["korean", "crypto", "kimchi-premium", "upbit", "bithumb", "fx-rate", "market-data", "asia", "arbitrage", "exchange-intelligence", "ai-analysis"]
+        "tags": ["korean", "crypto", "kimchi-premium", "upbit", "bithumb", "fx-rate", "market-data", "asia", "arbitrage", "exchange-intelligence", "ai-analysis", "divergence", "coingecko"]
     }
 
 LLMS_TXT_CONTENT = """# KR Crypto Intelligence API
@@ -717,6 +877,17 @@ predicts global crypto returns.
   Comprehensive market analysis combining 12+ data sources with
   Claude AI. Returns signal (BULLISH/BEARISH/NEUTRAL), confidence
   score, token-level alerts.
+- GET /api/v1/global-vs-korea-divergence?symbol={SYMBOL} -> $0.05
+  Global (CoinGecko) vs Korean (Upbit) price divergence with AI
+  interpretation (1-2 sentence summary). 25 supported symbols
+  (BTC, ETH, XRP, SOL, ADA, DOGE, DOT, MATIC, LINK, AVAX, ATOM,
+  UNI, LTC, NEAR, OP, ARB, APT, ALGO, FTM, SUI, TRX, BCH, ETC,
+  HBAR, SHIB).
+- GET /api/v1/global-vs-korea-divergence-deep?symbol={SYMBOL} -> $0.10
+  Same as light tier plus: Korean news signals from Coinness Telegram
+  (24h window, top keywords, sentiment score) and structured AI
+  analysis with korean_market_drivers, global_context, action
+  suggestion, and confidence rating.
 
 ### Korean Exchange Intelligence
 - GET /api/v1/arbitrage-scanner -> $0.01
@@ -922,14 +1093,15 @@ async def kr_sentiment_endpoint(request: Request):
     track_request("/api/v1/kr-sentiment")
     ip = get_real_ip(request)
     try:
-        result = await handle_kr_sentiment(tg_send_func=tg_send)
+        # Claude 이상 감지 알림은 비결제 이벤트 — 플래그 off 시 tg_send 전달 안 함
+        anomaly_sender = tg_send if ENABLE_REALTIME_NON_PAYMENT_ALERTS else None
+        result = await handle_kr_sentiment(tg_send_func=anomaly_sender)
         log_event("api_call", endpoint="kr-sentiment", paid=True, price_usd=0.05)
-        await tg_notify_request("/api/v1/kr-sentiment", "", ip, 200)
+        # Note: 텔레그램 알림은 미들웨어(line ~655)에서 일괄 발송 — 중복 카운트 방지
         return result
     except Exception as e:
         stats["errors"] += 1
         log_event("error", endpoint="kr-sentiment", error=str(e)[:200])
-        await tg_notify_request("/api/v1/kr-sentiment", "", ip, 503)
         raise HTTPException(status_code=503, detail=f"Sentiment analysis failed: {str(e)[:100]}")
 
 
@@ -943,6 +1115,11 @@ if __name__ == "__main__":
 # ============================================================
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+
+# 단일 Anthropic 클라이언트 — 모듈 레벨, thread-safe 공식 보장.
+# 매 호출마다 새 인스턴스 생성 시 connection pool 재초기화로 200~400ms 손실.
+# timeout=30초로 통일 (deep 호출 기준 가장 큰 값).
+ANTHROPIC_CLIENT = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=30.0)
 
 async def fetch_upbit_volume_top(limit=5):
     try:
@@ -1132,8 +1309,7 @@ Rules:
 Respond ONLY with this JSON (no markdown, no backticks):
 {{"signal":"BULLISH or BEARISH or NEUTRAL","confidence":7,"summary":"Your analysis here.","key_factors":["factor1","factor2","factor3","factor4"],"token_alerts":["TOKEN1: reason","TOKEN2: reason"],"risk_warning":"Main risk to watch."}}"""
     try:
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        message = client.messages.create(
+        message = ANTHROPIC_CLIENT.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=500,
             messages=[{"role": "user", "content": prompt}]
@@ -1166,9 +1342,8 @@ async def arbitrage_scanner(request: Request):
     ip = get_real_ip(request)
     data = compute_intel_data()
     if not data:
-        await tg_notify_request("/api/v1/arbitrage-scanner", "", ip, 503)
         raise HTTPException(status_code=503, detail="Intel data not ready yet. Try again in 60 seconds.")
-    await tg_notify_request("/api/v1/arbitrage-scanner", "", ip)
+    # 텔레그램 알림은 미들웨어에서 일괄 발송
     return {
         "premiums": data["premiums"],
         "reverse_premiums": [p for p in data["premiums"] if p["premium_pct"] < 0],
@@ -1188,9 +1363,8 @@ async def exchange_alerts(request: Request):
     ip = get_real_ip(request)
     data = compute_intel_data()
     if not data:
-        await tg_notify_request("/api/v1/exchange-alerts", "", ip, 503)
         raise HTTPException(status_code=503, detail="Intel data not ready yet. Try again in 60 seconds.")
-    await tg_notify_request("/api/v1/exchange-alerts", "", ip)
+    # 텔레그램 알림은 미들웨어에서 일괄 발송
     return {
         "listing_changes": data["listing_changes"],
         "caution_tokens": data["caution_tokens"],
@@ -1206,9 +1380,8 @@ async def market_movers(request: Request):
     ip = get_real_ip(request)
     data = compute_intel_data()
     if not data:
-        await tg_notify_request("/api/v1/market-movers", "", ip, 503)
         raise HTTPException(status_code=503, detail="Intel data not ready yet. Try again in 60 seconds.")
-    await tg_notify_request("/api/v1/market-movers", "", ip)
+    # 텔레그램 알림은 미들웨어에서 일괄 발송
     return {
         "movers_1m": data["movers_1m"],
         "volume_spikes": data["vol_spikes"],
@@ -1297,12 +1470,460 @@ async def market_read(request: Request):
             "timestamp": int(_time.time() * 1000),
         }
 
-        await tg_notify_request("/api/v1/market-read", "ALL", ip, 200)
+        # 텔레그램 알림은 미들웨어에서 일괄 발송
         return response
 
     except Exception as e:
         print(f"[ERR] market-read: {e}")
         import traceback
         traceback.print_exc()
-        await tg_notify_request("/api/v1/market-read", "ALL", ip, 500)
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ============================================================
+# Global vs Korea Divergence — CoinGecko + Korean exchange + AI
+# ============================================================
+
+# Symbol → CoinGecko coin id
+COINGECKO_ID_MAP = {
+    "BTC": "bitcoin", "ETH": "ethereum", "XRP": "ripple", "SOL": "solana",
+    "ADA": "cardano", "DOGE": "dogecoin", "DOT": "polkadot",
+    "MATIC": "matic-network", "LINK": "chainlink", "AVAX": "avalanche-2",
+    "ATOM": "cosmos", "UNI": "uniswap", "LTC": "litecoin", "NEAR": "near",
+    "OP": "optimism", "ARB": "arbitrum", "APT": "aptos", "ALGO": "algorand",
+    "FTM": "fantom", "SUI": "sui", "TRX": "tron", "BCH": "bitcoin-cash",
+    "ETC": "ethereum-classic", "HBAR": "hedera-hashgraph", "SHIB": "shiba-inu",
+}
+
+# Symbol → 한국어 이름 (best-effort)
+KOREAN_NAME_MAP = {
+    "BTC": "비트코인", "ETH": "이더리움", "XRP": "리플", "SOL": "솔라나",
+    "ADA": "카르다노", "DOGE": "도지코인", "DOT": "폴카닷",
+    "MATIC": "폴리곤", "LINK": "체인링크", "AVAX": "아발란체",
+    "ATOM": "코스모스", "UNI": "유니스왑", "LTC": "라이트코인", "NEAR": "니어",
+    "OP": "옵티미즘", "ARB": "아비트럼", "APT": "앱토스", "ALGO": "알고랜드",
+    "FTM": "팬텀", "SUI": "수이", "TRX": "트론", "BCH": "비트코인캐시",
+    "ETC": "이더리움클래식", "HBAR": "헤데라", "SHIB": "시바이누",
+}
+
+# Cache: f"divergence:{symbol}:{depth}" -> (data, expires_at)
+_divergence_cache = {}
+_divergence_locks = {}  # per-key asyncio.Lock
+DIVERGENCE_LIGHT_TTL = 60
+DIVERGENCE_DEEP_TTL = 300
+
+
+def _get_divergence_lock(key: str):
+    if key not in _divergence_locks:
+        _divergence_locks[key] = asyncio.Lock()
+    return _divergence_locks[key]
+
+
+async def fetch_coingecko_price(symbol: str) -> dict | None:
+    """CoinGecko simple/price 조회. 60초 캐시."""
+    coin_id = COINGECKO_ID_MAP.get(symbol)
+    if not coin_id:
+        return None
+
+    cache_key = f"coingecko:{symbol}"
+    cached, age = get_cache(cache_key)
+    if cached:
+        cached["data_age_seconds"] = round(age, 1)
+        return cached
+
+    url = "https://api.coingecko.com/api/v3/simple/price"
+    params = {
+        "ids": coin_id,
+        "vs_currencies": "usd",
+        "include_24hr_change": "true",
+        "include_24hr_vol": "true",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(url, params=params)
+            r.raise_for_status()
+            data = r.json()
+            if coin_id not in data:
+                return None
+            entry = data[coin_id]
+            result = {
+                "coin_id": coin_id,
+                "price_usd": float(entry.get("usd", 0)),
+                "change_24h_pct": float(entry.get("usd_24h_change", 0) or 0),
+                "volume_24h_usd": float(entry.get("usd_24h_vol", 0) or 0),
+                "data_age_seconds": 0,
+            }
+            set_cache(cache_key, result)
+            return result
+    except Exception as e:
+        print(f"[DIVERGENCE] CoinGecko fetch failed for {symbol}: {e}")
+        return None
+
+
+def classify_magnitude(premium_pct: float) -> str:
+    a = abs(premium_pct)
+    if a < 1.0:
+        return "small"
+    if a < 3.0:
+        return "moderate"
+    return "large"
+
+
+def classify_direction(premium_pct: float) -> str:
+    if abs(premium_pct) < 0.1:
+        return "neutral"
+    return "positive" if premium_pct > 0 else "negative"
+
+
+def compute_volume_spike(symbol: str, current_volume_24h: float) -> bool:
+    """Upbit 24h volume이 기존 캐시된 단기 평균의 1.5배를 초과하면 True.
+    7일 평균 데이터는 별도 시계열이 없으므로, intel_cache의 prev_upbit_tickers를
+    근사 기준으로 사용 (직전 사이클 vs 현재 = 단기 변동 감지)."""
+    try:
+        prev = intel_cache.get("prev_upbit_tickers", {})
+        prev_data = prev.get(symbol)
+        if not prev_data:
+            return False
+        prev_vol = prev_data.get("volume_24h", 0)
+        if prev_vol <= 0:
+            return False
+        # 24h volume이 직전 사이클(보통 1분 전) 대비 +50% 이상이면 spike
+        return current_volume_24h > prev_vol * 1.5
+    except Exception:
+        return False
+
+
+def get_investment_warning(symbol: str) -> bool:
+    """intel_cache의 upbit_market_details에서 해당 symbol의 warning 플래그 확인."""
+    try:
+        details = intel_cache.get("upbit_market_details", {})
+        d = details.get(symbol, {})
+        return bool(d.get("warning", False))
+    except Exception:
+        return False
+
+
+# === Coinness 24h 뉴스 백그라운드 캐시 (5분 TTL, 모든 25개 심볼 공유) ===
+# Coinness는 전체 한국 시장 뉴스라 심볼 무관 — 매 deep 요청마다 fetch하면 1~2초 손실.
+# 5분마다 백그라운드 task가 갱신, 핸들러는 메모리에서만 읽음 (논블로킹).
+_coinness_news_cache = {
+    "messages": [],         # list of {"text": str, "timestamp": str}
+    "fetched_at": 0,        # unix ts of last successful fetch
+    "status": "pending",    # "ok" | "stale" | "pending" | "failed"
+}
+COINNESS_REFRESH_INTERVAL = 300  # 5분
+
+
+async def coinness_news_poller():
+    """startup 시 1회 fetch + 5분마다 갱신. compute_divergence는 캐시만 읽음."""
+    while True:
+        try:
+            from kr_sentiment import fetch_coinness_news
+            news = await fetch_coinness_news(hours=24)
+            _coinness_news_cache["messages"] = news
+            _coinness_news_cache["fetched_at"] = time.time()
+            _coinness_news_cache["status"] = "ok"
+            print(f"[DIVERGENCE] Coinness cache refreshed: {len(news)} messages")
+        except Exception as e:
+            print(f"[DIVERGENCE] Coinness cache refresh failed: {e}")
+            # 이전 데이터가 있으면 stale로 표시, 없으면 failed
+            if _coinness_news_cache["messages"]:
+                _coinness_news_cache["status"] = "stale"
+            else:
+                _coinness_news_cache["status"] = "failed"
+        await asyncio.sleep(COINNESS_REFRESH_INTERVAL)
+
+
+def get_news_signal_for_symbol(symbol: str, korean_name: str) -> dict:
+    """캐시된 Coinness 뉴스에서 symbol/한국어명 매칭 추출 (deep 전용, 동기 함수).
+    캐시 누락(failed) 시 빈 시그널 반환."""
+    news = _coinness_news_cache["messages"]
+    status = _coinness_news_cache["status"]
+
+    if not news or status == "failed":
+        return {
+            "korean_news_count_24h": 0,
+            "sentiment_score": 0.0,
+            "top_keywords": [],
+            "source": "Coinness Telegram (unavailable)",
+        }
+
+    sym_lower = symbol.lower()
+    name_terms = [korean_name] if korean_name else []
+    matched_texts = []
+    for n in news:
+        t = n.get("text", "")
+        t_lower = t.lower()
+        if sym_lower in t_lower or any(name in t for name in name_terms):
+            matched_texts.append(t)
+
+    keywords = _extract_top_keywords(matched_texts, top_n=3)
+    sentiment = _simple_sentiment(matched_texts)
+
+    source_label = "Coinness Telegram" if status == "ok" else "Coinness Telegram (stale)"
+    return {
+        "korean_news_count_24h": len(matched_texts),
+        "sentiment_score": round(sentiment, 2),
+        "top_keywords": keywords,
+        "source": source_label,
+    }
+
+
+_POSITIVE_KW = ["상승", "급등", "호재", "매수", "기관", "ETF", "승인", "상장", "신고가", "돌파", "랠리"]
+_NEGATIVE_KW = ["하락", "급락", "악재", "매도", "규제", "거부", "상장폐지", "신저가", "패닉", "청산"]
+_STOP = {"이", "그", "저", "것", "수", "등", "및", "의", "에", "를", "은", "는", "가", "이다", "있다", "한다"}
+
+
+def _extract_top_keywords(texts: list[str], top_n: int = 3) -> list[str]:
+    if not texts:
+        return []
+    counts = {}
+    word_pattern = re.compile(r"[가-힣A-Z]{2,10}")
+    for t in texts:
+        for w in word_pattern.findall(t):
+            if w in _STOP:
+                continue
+            counts[w] = counts.get(w, 0) + 1
+    sorted_kw = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+    return [kw for kw, _ in sorted_kw[:top_n]]
+
+
+def _simple_sentiment(texts: list[str]) -> float:
+    if not texts:
+        return 0.0
+    pos = neg = 0
+    for t in texts:
+        for kw in _POSITIVE_KW:
+            if kw in t:
+                pos += 1
+        for kw in _NEGATIVE_KW:
+            if kw in t:
+                neg += 1
+    total = pos + neg
+    if total == 0:
+        return 0.0
+    return (pos - neg) / total
+
+
+def call_claude_divergence_light(symbol: str, premium_pct: float, direction: str,
+                                  warning: bool, volume_spike: bool) -> str | None:
+    """Light AI 해석 — 단일 영문 paragraph (1-2 문장)."""
+    prompt = f"""You are an analyst summarizing Korea vs global crypto divergence in 1-2 sentences.
+Data:
+
+Symbol: {symbol}
+Korea premium: {premium_pct}%
+Direction: {direction}
+Investment warning active: {warning}
+Volume spike 24h: {volume_spike}
+
+Output: Single English paragraph, factual, no investment advice."""
+    try:
+        msg = ANTHROPIC_CLIENT.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=120,
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return msg.content[0].text.strip()
+    except Exception as e:
+        print(f"[DIVERGENCE] Claude light failed: {e}")
+        return None
+
+
+def call_claude_divergence_deep(symbol: str, premium_pct: float, direction: str,
+                                 warning: bool, volume_spike: bool,
+                                 news_count: int, keywords: list[str],
+                                 sentiment_score: float) -> dict | None:
+    """Deep AI 해석 — JSON 응답."""
+    prompt = f"""You are a Korea-focused crypto market analyst. Produce structured analysis.
+Inputs:
+
+Symbol: {symbol}
+Korea premium: {premium_pct}% ({direction})
+Korea volume spike: {volume_spike}
+Investment warning: {warning}
+Korean news count 24h: {news_count}
+Top keywords: {keywords}
+News sentiment: {sentiment_score}
+
+Output JSON only (no markdown):
+{{"summary":"2-3 sentence overview","korean_market_drivers":["bullet 1","bullet 2","bullet 3"],"global_context":"1 sentence","implied_action_suggestion":"factual statement, not financial advice","confidence":"low|medium|high"}}"""
+    try:
+        msg = ANTHROPIC_CLIENT.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = msg.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+            text = text.strip()
+        return json.loads(text)
+    except Exception as e:
+        print(f"[DIVERGENCE] Claude deep failed: {e}")
+        return None
+
+
+async def compute_divergence(symbol: str, depth: str) -> dict:
+    """Light/deep 모두 처리. CoinGecko + Upbit + FX + AI."""
+    coin_id = COINGECKO_ID_MAP.get(symbol)
+    korean_name = KOREAN_NAME_MAP.get(symbol, "")
+
+    # 병렬 fetch: CoinGecko, Upbit, FX
+    cg_task = fetch_coingecko_price(symbol)
+    upbit_task = fetch_upbit_price(symbol)
+    fx_task = fetch_fx_rate()
+    cg, upbit, fx = await asyncio.gather(cg_task, upbit_task, fx_task, return_exceptions=True)
+
+    if isinstance(cg, Exception) or cg is None:
+        # CoinGecko 실패 — stale cache 시도
+        stale, _ = get_cache(f"coingecko:{symbol}")
+        if not stale:
+            raise HTTPException(status_code=503, detail="CoinGecko unavailable and no cached data. Try again shortly.")
+        cg = stale
+
+    if isinstance(upbit, Exception) or upbit is None or "error" in (upbit or {}):
+        raise HTTPException(status_code=503, detail=f"Upbit price unavailable for {symbol}.")
+
+    if isinstance(fx, Exception) or fx is None:
+        raise HTTPException(status_code=503, detail="FX rate unavailable.")
+
+    global_usd = cg["price_usd"]
+    korea_krw = upbit["price_krw"]
+    fx_rate = fx["rate"]
+    fx_source = fx["source"]
+
+    if global_usd <= 0 or fx_rate <= 0:
+        raise HTTPException(status_code=503, detail="Invalid price/fx data.")
+
+    korea_implied_usd = round(korea_krw / fx_rate, 2)
+    global_krw_equiv = global_usd * fx_rate
+    premium_pct = round(((korea_krw - global_krw_equiv) / global_krw_equiv) * 100, 3)
+    direction = classify_direction(premium_pct)
+    magnitude = classify_magnitude(premium_pct)
+
+    warning = get_investment_warning(symbol)
+    volume_spike = compute_volume_spike(symbol, upbit.get("volume_24h", 0) or 0)
+
+    response = {
+        "symbol": symbol,
+        "korean_name": korean_name,
+        "timestamp": int(time.time() * 1000),
+        "prices": {
+            "global_usd": global_usd,
+            "global_source": "CoinGecko",
+            "korea_krw": korea_krw,
+            "korea_source": "Upbit",
+            "fx_rate": fx_rate,
+            "fx_source": fx_source,
+        },
+        "divergence": {
+            "korea_implied_usd": korea_implied_usd,
+            "premium_pct": premium_pct,
+            "direction": direction,
+            "magnitude": magnitude,
+        },
+        "context_signals": {
+            "investment_warning": warning,
+            "volume_spike_24h": volume_spike,
+            "global_volume_change_pct": round(cg.get("change_24h_pct", 0), 2),
+        },
+        "data_age_seconds": cg.get("data_age_seconds", 0),
+        "depth": depth,
+    }
+
+    # AI 해석 — light 또는 deep
+    loop = asyncio.get_event_loop()
+    if depth == "light":
+        ai_text = await loop.run_in_executor(
+            None, call_claude_divergence_light,
+            symbol, premium_pct, direction, warning, volume_spike,
+        )
+        response["ai_interpretation"] = ai_text  # may be None on error
+    else:  # deep
+        # 뉴스 시그널은 백그라운드 캐시에서 즉시 읽음 (블로킹 없음)
+        news_signal = get_news_signal_for_symbol(symbol, korean_name)
+        response["recent_news_signal"] = news_signal
+
+        # Deep tier는 ai_deep_analysis 1회만 호출 (이전: light + deep 2회 → 50% 단축)
+        deep_obj = await loop.run_in_executor(
+            None, call_claude_divergence_deep,
+            symbol, premium_pct, direction, warning, volume_spike,
+            news_signal["korean_news_count_24h"],
+            news_signal["top_keywords"],
+            news_signal["sentiment_score"],
+        )
+        response["ai_deep_analysis"] = deep_obj  # may be None
+
+    return response
+
+
+async def _serve_divergence(symbol: str, depth_norm: str, endpoint_label: str, price_usd: float, ttl: int):
+    """Shared light/deep dispatcher with per-key cache + lock."""
+    sym = validate_symbol(symbol)
+    if sym not in COINGECKO_ID_MAP:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "unsupported symbol", "supported": sorted(COINGECKO_ID_MAP.keys())},
+        )
+
+    cache_key = f"divergence:{sym}:{depth_norm}"
+
+    # Fast cache hit
+    now = time.time()
+    cached_entry = _divergence_cache.get(cache_key)
+    if cached_entry and now < cached_entry[1]:
+        data = dict(cached_entry[0])
+        data["data_age_seconds"] = int(now - (cached_entry[1] - ttl))
+        log_event("api_call", endpoint=endpoint_label, paid=True, price_usd=price_usd)
+        return data
+
+    # Slow path with per-key lock
+    lock = _get_divergence_lock(cache_key)
+    async with lock:
+        now = time.time()
+        cached_entry = _divergence_cache.get(cache_key)
+        if cached_entry and now < cached_entry[1]:
+            data = dict(cached_entry[0])
+            data["data_age_seconds"] = int(now - (cached_entry[1] - ttl))
+            log_event("api_call", endpoint=endpoint_label, paid=True, price_usd=price_usd)
+            return data
+
+        try:
+            result = await compute_divergence(sym, depth_norm)
+        except HTTPException:
+            stats["errors"] += 1
+            raise
+        except Exception as e:
+            stats["errors"] += 1
+            print(f"[DIVERGENCE] compute error: {e}")
+            log_event("error", endpoint=endpoint_label, error=str(e)[:200])
+            raise HTTPException(status_code=503, detail=f"Divergence computation failed: {str(e)[:100]}")
+
+        _divergence_cache[cache_key] = (result, time.time() + ttl)
+        log_event("api_call", endpoint=endpoint_label, paid=True, price_usd=price_usd)
+        return result
+
+
+@app.get("/api/v1/global-vs-korea-divergence")
+async def global_vs_korea_divergence(
+    request: Request,
+    symbol: str = Query(default="BTC", description="Crypto symbol (e.g., BTC, ETH, XRP)"),
+):
+    """Light tier — divergence + 1-2 sentence AI summary. $0.05."""
+    track_request("/api/v1/global-vs-korea-divergence")
+    return await _serve_divergence(symbol, "light", "global-vs-korea-divergence", 0.05, DIVERGENCE_LIGHT_TTL)
+
+
+@app.get("/api/v1/global-vs-korea-divergence-deep")
+async def global_vs_korea_divergence_deep(
+    request: Request,
+    symbol: str = Query(default="BTC", description="Crypto symbol (e.g., BTC, ETH, XRP)"),
+):
+    """Deep tier — light data + Korean news signal + structured AI analysis. $0.10."""
+    track_request("/api/v1/global-vs-korea-divergence-deep")
+    return await _serve_divergence(symbol, "deep", "global-vs-korea-divergence-deep", 0.10, DIVERGENCE_DEEP_TTL)
