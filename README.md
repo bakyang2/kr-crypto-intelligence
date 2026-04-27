@@ -1,13 +1,19 @@
 # KR Crypto Intelligence API
 
-Korean crypto market data + AI analysis for AI agents. 11 endpoints, 180+ tokens, world's first Korean-to-English crypto sentiment API. Pay-per-use via x402 protocol on Base and Solana.
+Korean crypto market data + AI analysis for AI agents. 11 paid endpoints, 180+ tokens, world's first Korean-to-English crypto sentiment API. Pay-per-use via x402 protocol on Base, Polygon, and Solana.
 
-## Endpoints (11)
+## Endpoints (11 paid)
 
-### Korean Sentiment Analysis (NEW — World's First)
+### Korean Sentiment Analysis (World's First)
 | Endpoint | Price | Description |
 |----------|-------|-------------|
 | `/api/v1/kr-sentiment` | $0.05 | Korean market sentiment in English — combines exchange intelligence (189+ tokens) with Korean news context (Coinness Telegram) for AI-powered insights. 1-hour cache. |
+
+### Global vs Korea Divergence (NEW)
+| Endpoint | Price | Description |
+|----------|-------|-------------|
+| `/api/v1/global-vs-korea-divergence` | $0.05 | Global vs Korea divergence (light) — CoinGecko global price + Korean exchange + 1-2 sentence AI summary. 60s cache. |
+| `/api/v1/global-vs-korea-divergence-deep` | $0.10 | Deep tier — light data + Korean news signals (Coinness Telegram) + structured AI breakdown (drivers, global context, action suggestion, confidence). 5-min cache. |
 
 ### Korean Exchange Intelligence
 | Endpoint | Price | Description |
@@ -30,10 +36,13 @@ Korean crypto market data + AI analysis for AI agents. 11 endpoints, 180+ tokens
 | `/api/v1/fx-rate` | $0.001 | USD/KRW exchange rate |
 
 ### Free
-| Endpoint | Price | Description |
-|----------|-------|-------------|
-| `/api/v1/symbols` | Free | Available trading symbols |
-| `/health` | Free | Service health check |
+| Endpoint | Description |
+|----------|-------------|
+| `/api/v1/symbols` | Available trading symbols |
+| `/api/v1/stats` | Service statistics |
+| `/health` | Service health check |
+| `/llms.txt` | AI agent metadata |
+| `/.well-known/x402` | x402 service discovery |
 
 ## Live API
 
@@ -49,6 +58,11 @@ Korean crypto market data + AI analysis for AI agents. 11 endpoints, 180+ tokens
 - Claude AI generates: sentiment (BULLISH/BEARISH/CAUTIOUS_FOMO/PANIC/GREED/UNCERTAIN), score (-1.0 to +1.0), English report, exchange signals, news context, sources
 - Academic research validates: "Korean news sentiment predicts global crypto returns" (2026)
 - 1-hour cache + lazy invocation + concurrency lock for cost efficiency
+
+### Global vs Korea Divergence
+- Light tier: real-time premium between CoinGecko global price and Korean exchange (Upbit), with 1-2 sentence AI interpretation
+- Deep tier: adds Korean news signals (Coinness Telegram, 24h keywords + sentiment score) and structured AI analysis with Korean market drivers, global context, action suggestion, and confidence level
+- 25 supported symbols (BTC, ETH, XRP, SOL, ADA, DOGE, DOT, MATIC, LINK, AVAX, ATOM, UNI, LTC, NEAR, OP, ARB, APT, ALGO, FTM, SUI, TRX, BCH, ETC, HBAR, SHIB)
 
 ### Arbitrage Scanner
 - Real-time Kimchi Premium for **every token** traded on both Upbit and Binance (189+)
@@ -74,6 +88,7 @@ Korean crypto market data + AI analysis for AI agents. 11 endpoints, 180+ tokens
 
 Uses the [x402 protocol](https://x402.org) for micropayments. No API key, no subscription, no signup required.
 - **Base:** USDC on Base mainnet (eip155:8453)
+- **Polygon:** USDC on Polygon mainnet (eip155:137)
 - **Solana:** USDC on Solana mainnet
 
 ## Data Sources
@@ -81,9 +96,9 @@ Uses the [x402 protocol](https://x402.org) for micropayments. No API key, no sub
 - **Upbit** — Largest Korean crypto exchange (245+ KRW markets)
 - **Bithumb** — Second largest Korean exchange (450+ markets)
 - **Binance** — Global price reference (659+ USDT markets)
+- **CoinGecko** — Global crypto prices (divergence endpoints)
 - **Coinness Telegram** — Korean crypto news source for sentiment analysis
 - **exchangerate-api.com** — USD/KRW FX rate
-- **CoinGecko** — BTC/ETH/ALT dominance
 - **Alternative.me** — Fear & Greed Index
 - **Binance Futures** — Funding rate, open interest
 - **Claude AI (Haiku 4.5)** — Market analysis and sentiment interpretation
@@ -102,18 +117,6 @@ Connect any MCP-compatible AI agent (Claude, Cursor, etc.):
 }
 ```
 
-11 tools available: `get_kimchi_premium`, `get_kr_prices`, `get_fx_rate`, `get_stablecoin_premium`, `get_available_symbols`, `check_health`, `get_market_read`, `get_arbitrage_scanner`, `get_exchange_alerts`, `get_market_movers`, `get_kr_sentiment`
-
-## Tech Stack
-
-- Python / FastAPI
-- x402 Payment Protocol v2 (Base + Solana USDC)
-- CDP Facilitator (Coinbase Developer Platform)
-- Claude AI (Haiku 4.5) for market analysis and sentiment
-- FastMCP (Streamable HTTP transport)
-- Cloudflare SSL
-- Oracle Cloud ARM (Always Free Tier, \$0/month)
-
 ## License
 
-MIT
+MIT License — see [LICENSE](./LICENSE)
