@@ -1,0 +1,16 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.bakyang2/kr-crypto-intelligence",
+  "description": "Korean crypto market data + AI sentiment + Global vs Korea divergence for AI agents. 11 paid tools. x402 on Base+Polygon+Solana.",
+  "version": "1.4.0",
+  "repository": {
+    "url": "https://github.com/bakyang2/kr-crypto-intelligence",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.printmoneylab.com/mcp"
+    }
+  ]
+}
