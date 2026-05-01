@@ -30,7 +30,7 @@ Korean crypto market data + AI analysis for AI agents. 11 paid endpoints, 180+ t
 ### Market Data
 | Endpoint | Price | Description |
 |----------|-------|-------------|
-| `/api/v1/kimchi-premium` | $0.001 | BTC Kimchi Premium (Upbit vs Binance) |
+| `/api/v1/kimchi-premium` | $0.001 | BTC Kimchi Premium (Upbit vs Binance) — includes both official USD/KRW basis (`premium_pct`) and **USDT real-trade basis (`premium_pct_usdt`)** for true arbitrage edge measurement |
 | `/api/v1/stablecoin-premium` | $0.001 | USDT/USDC premium on Korean exchanges (fund flow indicator) |
 | `/api/v1/kr-prices` | $0.001 | Korean exchange prices (Upbit, Bithumb) |
 | `/api/v1/fx-rate` | $0.001 | USD/KRW exchange rate |
@@ -52,6 +52,11 @@ Korean crypto market data + AI analysis for AI agents. 11 paid endpoints, 180+ t
 
 ## Key Features
 
+### Dual-Basis Kimchi Premium (Industry First)
+- Both **official USD/KRW basis** (matches what exchanges display) and **USDT real-trade basis** (what arbitrage bots actually trade) in a single response
+- The 0.3-1% gap between the two is the structural USDT premium itself — measurable, actionable
+- Critical for AI trading agents: the official basis is misleading; only USDT basis reflects true arbitrage margin after capital movement costs
+- No other Kimchi Premium API in the x402 ecosystem provides this dual-basis view
 ### KR Sentiment (Unique — No Competitors Worldwide)
 - Real-time Korean market sentiment delivered in English
 - Combines exchange data (189+ tokens Kimchi Premium, warnings, volume spikes, deposit soaring) with Korean news context (Coinness Telegram, 6-hour window)
