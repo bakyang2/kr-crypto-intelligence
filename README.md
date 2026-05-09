@@ -1,6 +1,6 @@
 # KR Crypto Intelligence API
 
-Korean crypto market data + AI analysis for AI agents. 11 paid endpoints, 180+ tokens, world's first Korean-to-English crypto sentiment API. Pay-per-use via x402 protocol on Base, Polygon, and Solana.
+Korean crypto market data + AI analysis for AI agents. 11 paid endpoints, 180+ tokens, world's first Korean-to-English crypto sentiment API. Pay-per-use via x402 protocol on Base, Polygon, and Solana. WS Bedrock AgentCore-ready.
 
 ## Endpoints (11 paid)
 
@@ -107,6 +107,21 @@ Uses the [x402 protocol](https://x402.org) for micropayments. No API key, no sub
 - **Alternative.me** — Fear & Greed Index
 - **Binance Futures** — Funding rate, open interest
 - **Claude AI (Haiku 4.5)** — Market analysis and sentiment interpretation
+
+## AWS Bedrock AgentCore Integration
+
+KR Crypto Intelligence is x402-native and ready to be discovered by AWS Bedrock AgentCore Payments (launched May 7, 2026 by AWS + Coinbase + Stripe).
+
+Bedrock-powered agents can:
+- Discover all 11 endpoints via `.well-known/x402` and CDP MCP
+- Pay autonomously with USDC on Base, Polygon, or Solana
+- Access without API keys, signups, or human approval
+
+**Discovery endpoint**: `https://api.printmoneylab.com/.well-known/x402`  
+**MCP server**: `https://mcp.printmoneylab.com/mcp`  
+**OpenAPI spec**: `https://api.printmoneylab.com/openapi.json`
+
+No additional setup required. The service is indexed in CDP Bazaar across all 11 endpoints.
 
 ## MCP Server
 
