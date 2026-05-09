@@ -1,6 +1,6 @@
 # KR Crypto Intelligence API
 
-Korean crypto market data + AI analysis for AI agents. 11 paid endpoints, 180+ tokens, world's first Korean-to-English crypto sentiment API. Pay-per-use via x402 protocol on Base, Polygon, and Solana. WS Bedrock AgentCore-ready.
+Korean crypto market data + AI analysis for AI agents. 11 paid endpoints, 180+ tokens, world's first Korean-to-English crypto sentiment API. Pay-per-use via x402 protocol on Base, Polygon, and Solana. AWS Bedrock AgentCore-ready.
 
 ## Endpoints (11 paid)
 
