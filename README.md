@@ -1,15 +1,23 @@
 # KR Crypto Intelligence API
 
-Korean crypto market data + AI analysis for AI agents. 11 paid endpoints, 180+ tokens, world's first Korean-to-English crypto sentiment API. Pay-per-use via x402 protocol on Base, Polygon, and Solana. AWS Bedrock AgentCore-ready.
+Korean crypto market data + AI analysis for AI agents. 15 paid endpoints (11 crypto + 4 Korean news), 180+ tokens, world's first Korean-to-English crypto sentiment API. Pay-per-use via x402 protocol on Base, Polygon, and Solana. AWS Bedrock AgentCore-ready.
 
-## Endpoints (11 paid)
+## Endpoints (15 paid)
+
+### Korean News → English (new)
+| Endpoint | Price | Description |
+|----------|-------|-------------|
+| `GET /api/v1/kr-news/kpop` | $0.01 | K-pop news (artists/groups) translated to English |
+| `GET /api/v1/kr-news/kpop-summary` | $0.05 | K-pop news + AI sentiment analysis, key themes, trending artists |
+| `GET /api/v1/kr-news/semiconductor` | $0.02 | Korean semiconductor industry news (Samsung/SK Hynix/HBM) in English |
+| `GET /api/v1/kr-news/semiconductor-summary` | $0.10 | Semiconductor news + AI market signal (bullish/bearish), trending companies |
 
 ### Korean Sentiment Analysis (World's First)
 | Endpoint | Price | Description |
 |----------|-------|-------------|
 | `/api/v1/kr-sentiment` | $0.05 | Korean market sentiment in English — combines exchange intelligence (189+ tokens) with Korean news context (Coinness Telegram) for AI-powered insights. 1-hour cache. |
 
-### Global vs Korea Divergence (NEW)
+### Global vs Korea Divergence 
 | Endpoint | Price | Description |
 |----------|-------|-------------|
 | `/api/v1/global-vs-korea-divergence` | $0.05 | Global vs Korea divergence (light) — CoinGecko global price + Korean exchange + 1-2 sentence AI summary. 60s cache. |
