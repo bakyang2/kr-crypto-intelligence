@@ -144,6 +144,46 @@ Connect any MCP-compatible AI agent (Claude, Cursor, etc.):
   }
 }
 ```
+## Receipt Verification
+
+Every paid response includes a signed receipt. Bots can verify receipt authenticity using the merchant's public key.
+
+### Public Key
+Available at `/.well-known/x402` manifest under `receipt_signer.public_key`:
+curl https://api.printmoneylab.com/.well-known/x402 | jq '.receipt_signer'
+
+### Verification (Python)
+```python
+from eth_account import Account
+from eth_account.messages import encode_defunct
+
+receipt = response_json["receipt"]
+payload = "|".join([
+    receipt["id"], receipt["endpoint"], receipt["amount"],
+    receipt["currency"], receipt["network"], receipt["tx_hash"],
+    receipt["payer"], receipt["merchant"], receipt["issued_at"]
+])
+recovered = Account.recover_message(
+    encode_defunct(text=payload),
+    signature=receipt["signature"]
+)
+assert recovered.lower() == receipt["signer"].lower()
+```
+
+### Receipt Fields
+| Field | Description |
+|---|---|
+| id | Unique receipt identifier (rcpt_YYYYMMDD_xxxxxx) |
+| issued_at | ISO 8601 timestamp |
+| endpoint | API path that was paid for |
+| amount | Payment amount in USDC |
+| currency | "USDC" |
+| network | "eip155:8453" (Base) or "solana:..." |
+| tx_hash | On-chain transaction hash |
+| payer | Buyer's wallet address |
+| merchant | KR Crypto's wallet address |
+| signature | ECDSA secp256k1 signature |
+| signer | KR Crypto's signer address |
 
 ## License
 
