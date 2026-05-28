@@ -5,8 +5,23 @@ __pycache__/
 stats.json
 test_sentiment*.py
 patch_market_read.py
-*.pyc
-__pycache__/
 kr_sentiment_cache.json
 stats.jsonl
 stats_archive/
+main.py.bak.alert-fix
+
+# secrets / private keys — never commit
+.receipt_signer_key
+secrets/
+*.pem
+*.key
+
+# backups
+*.bak
+*.bak.*
+
+# runtime state / caches / logs
+logs/
+var/
+wallet_balance_cache.json
+data/*_new_entities.json
