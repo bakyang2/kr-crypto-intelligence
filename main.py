@@ -1523,7 +1523,13 @@ async def rate_limit_middleware(request: Request, call_next):
     if request.url.path in ("/health", "/docs", "/openapi.json", "/", "/favicon.ico", "/llms.txt", "/.well-known/x402"):
         return _apply_cors_headers(await call_next(request))
     ip = get_real_ip(request)
-    if not check_rate_limit(ip):
+    # x402 discovery probes: unpaid GETs to paid endpoints receive the cheap,
+    # static 402 challenge without consuming rate-limit quota. Requests carrying
+    # X-PAYMENT (actual settlement attempts) remain rate-limited.
+    x402_probe = (request.method == "GET"
+                  and request.url.path in PAID_ENDPOINTS_LIST
+                  and "x-payment" not in request.headers)
+    if not x402_probe and not check_rate_limit(ip):
         return _apply_cors_headers(JSONResponse(status_code=429, content={"detail": "Rate limit exceeded. Max 60 requests per minute.", "retry_after_seconds": 60}))
     response = await call_next(request)
     endpoint = request.url.path
