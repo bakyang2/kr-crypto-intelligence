@@ -503,7 +503,7 @@ Output JSON only (no markdown, no preamble, no trailing text):
     try:
         msg = _ANTHROPIC.messages.create(
             model=HAIKU_MODEL,
-            max_tokens=2500,
+            max_tokens=8000,
             temperature=0,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -588,7 +588,7 @@ Output JSON only:
     try:
         msg = _ANTHROPIC.messages.create(
             model=HAIKU_MODEL,   # was SONNET_MODEL (claude-sonnet-4-6); switched 2026-05-11
-            max_tokens=2500,
+            max_tokens=8000,
             temperature=0,
             messages=[{"role": "user", "content": prompt}],
         )
