@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
   "name": "io.github.bakyang2/kr-crypto-intelligence",
-  "description": "Korean crypto + news (kpop/semi) data, 17 MCP tools with signed receipts. x402 on Base+Polygon+Solana.",
+  "description": "Korean crypto + news (kpop/semi), 17 tools, signed receipts. x402 Base+Polygon+Solana.",
   "version": "1.6.0",
   "repository": {
     "url": "https://github.com/bakyang2/kr-crypto-intelligence",
