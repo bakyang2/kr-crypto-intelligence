@@ -38,9 +38,9 @@ Korean crypto market data + AI analysis for AI agents. 15 paid endpoints (11 cry
 ### Market Data
 | Endpoint | Price | Description |
 |----------|-------|-------------|
-| `/api/v1/kimchi-premium` | $0.001 | BTC Kimchi Premium (Upbit vs Binance) — includes both official USD/KRW basis (`premium_pct`) and **USDT real-trade basis (`premium_pct_usdt`)** for true arbitrage edge measurement |
-| `/api/v1/stablecoin-premium` | $0.001 | USDT/USDC premium on Korean exchanges (fund flow indicator) |
-| `/api/v1/kr-prices` | $0.001 | Korean exchange prices (Upbit, Bithumb) |
+| `/api/v1/kimchi-premium` | $0.002 | BTC Kimchi Premium (Upbit vs Binance) — includes both official USD/KRW basis (`premium_pct`) and **USDT real-trade basis (`premium_pct_usdt`)** for true arbitrage edge measurement |
+| `/api/v1/stablecoin-premium` | $0.002 | USDT/USDC premium on Korean exchanges (fund flow indicator) |
+| `/api/v1/kr-prices` | $0.002 | Korean exchange prices (Upbit, Bithumb) |
 | `/api/v1/fx-rate` | $0.001 | USD/KRW exchange rate |
 
 ### Free

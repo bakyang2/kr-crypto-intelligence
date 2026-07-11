@@ -77,10 +77,10 @@ except Exception as e:
 # === Endpoint → price map (USD) ===========================================
 # Single source of truth — mirrored from main.tg_notify_request price_map.
 ENDPOINT_PRICES = {
-    "/api/v1/kimchi-premium": "0.001",
-    "/api/v1/kr-prices": "0.001",
+    "/api/v1/kimchi-premium": "0.002",
+    "/api/v1/kr-prices": "0.002",
     "/api/v1/fx-rate": "0.001",
-    "/api/v1/stablecoin-premium": "0.001",
+    "/api/v1/stablecoin-premium": "0.002",
     "/api/v1/market-read": "0.10",
     "/api/v1/arbitrage-scanner": "0.01",
     "/api/v1/exchange-alerts": "0.01",

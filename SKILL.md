@@ -42,9 +42,9 @@ MCP server — no local code, no API keys, no credentials needed.
 | `get_arbitrage_scanner` | $0.01 | Token-by-token Kimchi Premium for 180+ tokens, reverse premium, Upbit-Bithumb gaps |
 | `get_exchange_alerts` | $0.01 | New listings/delistings, investment warnings, caution flags |
 | `get_market_movers` | $0.01 | 1-min price surges/crashes, volume spikes, top 20 by volume |
-| `get_kimchi_premium` | $0.001 | **Dual-basis** Kimchi Premium — `premium_percent` (official USD/KRW) + `premium_pct_usdt` (Upbit USDT live rate). Gap = real arbitrage margin |
-| `get_stablecoin_premium` | $0.001 | USDT/USDC premium (fund flow indicator) |
-| `get_kr_prices` | $0.001 | KRW prices from Upbit/Bithumb |
+| `get_kimchi_premium` | $0.002 | **Dual-basis** Kimchi Premium — `premium_percent` (official USD/KRW) + `premium_pct_usdt` (Upbit USDT live rate). Gap = real arbitrage margin |
+| `get_stablecoin_premium` | $0.002 | USDT/USDC premium (fund flow indicator) |
+| `get_kr_prices` | $0.002 | KRW prices from Upbit/Bithumb |
 | `get_fx_rate` | $0.001 | USD/KRW exchange rate |
 | `get_available_symbols` | $0.001 | Tradeable symbols list |
 | `check_health` | $0.001 | Service status |
@@ -57,9 +57,9 @@ GET https://api.printmoneylab.com/api/v1/kr-sentiment                    → $0.
 GET https://api.printmoneylab.com/api/v1/arbitrage-scanner               → $0.01
 GET https://api.printmoneylab.com/api/v1/exchange-alerts                 → $0.01
 GET https://api.printmoneylab.com/api/v1/market-movers                   → $0.01
-GET https://api.printmoneylab.com/api/v1/kimchi-premium                  → $0.001
-GET https://api.printmoneylab.com/api/v1/stablecoin-premium              → $0.001
-GET https://api.printmoneylab.com/api/v1/kr-prices                       → $0.001
+GET https://api.printmoneylab.com/api/v1/kimchi-premium                  → $0.002
+GET https://api.printmoneylab.com/api/v1/stablecoin-premium              → $0.002
+GET https://api.printmoneylab.com/api/v1/kr-prices                       → $0.002
 GET https://api.printmoneylab.com/api/v1/fx-rate                         → $0.001
 GET https://api.printmoneylab.com/api/v1/symbols                         (free)
 GET https://api.printmoneylab.com/health                                 (free)

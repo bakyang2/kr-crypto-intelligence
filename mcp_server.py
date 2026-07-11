@@ -356,7 +356,7 @@ mcp = FastMCP("KR Crypto Intelligence")
 async def get_kimchi_premium(symbol: str = Field(default="BTC", description="Crypto symbol to check premium for (e.g., BTC, ETH, XRP)")) -> dict:
     """Get real-time Kimchi Premium — the price difference between Korean exchanges (Upbit) and global exchanges (Binance). South Korea ranks top 3 globally in crypto trading volume. A positive premium means Korean traders are paying more than the global market price.
 
-    💰 Price: $0.001 USDC per call
+    💰 Price: $0.002 USDC per call
     💳 Payment: x402 micropayment on Base, Polygon, or Solana
     🔧 Client: AgentCash, Pay.sh, or any x402 SDK
     📖 Docs: https://api.printmoneylab.com/.well-known/x402
@@ -373,7 +373,7 @@ async def get_kimchi_premium(symbol: str = Field(default="BTC", description="Cry
 async def get_kr_prices(symbol: str = Field(default="BTC", description="Crypto symbol to query (e.g., BTC, ETH, XRP)"), exchange: str = Field(default="all", description="Exchange to query: upbit, bithumb, or all")) -> dict:
     """Get cryptocurrency prices from Korean exchanges (Upbit, Bithumb). Returns KRW-denominated prices, 24h volume, and change rate.
 
-    💰 Price: $0.001 USDC per call
+    💰 Price: $0.002 USDC per call
     💳 Payment: x402 micropayment on Base, Polygon, or Solana
     🔧 Client: AgentCash, Pay.sh, or any x402 SDK
     📖 Docs: https://api.printmoneylab.com/.well-known/x402
@@ -413,7 +413,7 @@ async def get_available_symbols() -> dict:
 async def get_stablecoin_premium() -> dict:
     """Get USDT and USDC premium on Korean exchanges vs official USD/KRW rate. Positive premium = capital flowing INTO Korean crypto market. Negative premium = capital flowing OUT. Key indicator of Korean market fund flow direction, separate from Kimchi Premium.
 
-    💰 Price: $0.001 USDC per call
+    💰 Price: $0.002 USDC per call
     💳 Payment: x402 micropayment on Base, Polygon, or Solana
     🔧 Client: AgentCash, Pay.sh, or any x402 SDK
     📖 Docs: https://api.printmoneylab.com/.well-known/x402

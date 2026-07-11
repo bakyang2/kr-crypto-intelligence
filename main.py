@@ -229,6 +229,9 @@ async def tg_notify_request(endpoint, symbol, ip, status_code=200, network=None,
         return
 
     price_map = {
+        "/api/v1/kimchi-premium": "$0.002",
+        "/api/v1/kr-prices": "$0.002",
+        "/api/v1/stablecoin-premium": "$0.002",
         "/api/v1/market-read": "$0.10",
         "/api/v1/kr-sentiment": "$0.05",
         "/api/v1/arbitrage-scanner": "$0.01",
@@ -241,7 +244,7 @@ async def tg_notify_request(endpoint, symbol, ip, status_code=200, network=None,
         "/api/v1/kr-news/semiconductor": "$0.02",
         "/api/v1/kr-news/semiconductor-summary": "$0.10",
     }
-    price = price_map.get(endpoint, "$0.001")
+    price = price_map.get(endpoint, "$0.001")  # fx-rate falls through here at $0.001
     price_value = float(price.replace("$", ""))
     net_label = _network_label(network)
 
@@ -812,7 +815,7 @@ def _with_catalog(endpoint_path: str, extensions: dict) -> dict:
 
 x402_routes = {
     "GET /api/v1/kimchi-premium": RouteConfig(
-        accepts=_pay_opts("$0.001"),
+        accepts=_pay_opts("$0.002"),
         description="Real-time Kimchi Premium for a single token (Upbit vs Binance via FX rate)",
         mime_type="application/json",
         extensions=declare_discovery_extension(
@@ -845,7 +848,7 @@ x402_routes = {
         ),
     ),
     "GET /api/v1/kr-prices": RouteConfig(
-        accepts=_pay_opts("$0.001"),
+        accepts=_pay_opts("$0.002"),
         description="Korean exchange prices (Upbit, Bithumb) for a single token in KRW",
         mime_type="application/json",
         extensions=declare_discovery_extension(
@@ -890,7 +893,7 @@ x402_routes = {
         ),
     ),
     "GET /api/v1/stablecoin-premium": RouteConfig(
-        accepts=_pay_opts("$0.001"),
+        accepts=_pay_opts("$0.002"),
         description="USDT/USDC premium on Korean exchanges vs official USD/KRW rate — fund flow indicator",
         mime_type="application/json",
         extensions=declare_discovery_extension(
@@ -1270,10 +1273,10 @@ app.include_router(x402watch_feed_router)
 from fastapi.openapi.utils import get_openapi as _agentcash_get_openapi
 
 PAID_ENDPOINTS_PRICING = {
-    "/api/v1/kimchi-premium": "0.001000",
-    "/api/v1/kr-prices": "0.001000",
+    "/api/v1/kimchi-premium": "0.002000",
+    "/api/v1/kr-prices": "0.002000",
     "/api/v1/fx-rate": "0.001000",
-    "/api/v1/stablecoin-premium": "0.001000",
+    "/api/v1/stablecoin-premium": "0.002000",
     "/api/v1/arbitrage-scanner": "0.010000",
     "/api/v1/exchange-alerts": "0.010000",
     "/api/v1/market-movers": "0.010000",
@@ -1666,10 +1669,10 @@ async def x402_manifest():
             "payload_format": "id|endpoint|amount|currency|network|tx_hash|payer|merchant|issued_at",
         },
         "endpoints": [
-            {"path": "/api/v1/kimchi-premium", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Real-time Kimchi Premium (Upbit vs Binance)"},
-            {"path": "/api/v1/kr-prices", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean exchange prices (Upbit, Bithumb)"},
+            {"path": "/api/v1/kimchi-premium", "method": "GET", "price": "$0.002", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Real-time Kimchi Premium (Upbit vs Binance)"},
+            {"path": "/api/v1/kr-prices", "method": "GET", "price": "$0.002", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean exchange prices (Upbit, Bithumb)"},
             {"path": "/api/v1/fx-rate", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "USD/KRW exchange rate"},
-            {"path": "/api/v1/stablecoin-premium", "method": "GET", "price": "$0.001", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "USDT/USDC premium on Korean exchanges (fund flow indicator)"},
+            {"path": "/api/v1/stablecoin-premium", "method": "GET", "price": "$0.002", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "USDT/USDC premium on Korean exchanges (fund flow indicator)"},
             {"path": "/api/v1/arbitrage-scanner", "method": "GET", "price": "$0.01", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Token-by-token Kimchi Premium for 189+ tokens, reverse premium, Upbit-Bithumb gaps, market share"},
             {"path": "/api/v1/exchange-alerts", "method": "GET", "price": "$0.01", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "New listings/delistings, investment warnings, caution flags"},
             {"path": "/api/v1/market-movers", "method": "GET", "price": "$0.01", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "1-min price surges/crashes, volume spikes, top volume tokens"},
@@ -1796,9 +1799,9 @@ predicts global crypto returns.
   1-minute price surges/crashes, volume spikes, top 20 by volume.
 
 ### Market Data
-- GET /api/v1/kimchi-premium?symbol={SYMBOL} -> $0.001
-- GET /api/v1/stablecoin-premium -> $0.001
-- GET /api/v1/kr-prices?symbol={SYMBOL}&exchange={EXCHANGE} -> $0.001
+- GET /api/v1/kimchi-premium?symbol={SYMBOL} -> $0.002
+- GET /api/v1/stablecoin-premium -> $0.002
+- GET /api/v1/kr-prices?symbol={SYMBOL}&exchange={EXCHANGE} -> $0.002
 - GET /api/v1/fx-rate -> $0.001
 
 ### Korean News → English (Naver-aggregated, AI-translated)
@@ -1887,7 +1890,7 @@ async def symbols():
 @app.get("/api/v1/kimchi-premium")
 async def kimchi_premium(request: Request, symbol: str = Query(default="BTC", description="Crypto symbol (e.g., BTC, ETH, XRP)")):
     track_request("kimchi-premium")
-    log_event("api_call", endpoint="kimchi-premium", paid=True, price_usd=0.001, ip=get_real_ip(request))
+    log_event("api_call", endpoint="kimchi-premium", paid=True, price_usd=0.002, ip=get_real_ip(request))
     symbol = validate_symbol(symbol)
     try:
         upbit = await fetch_upbit_price(symbol)
@@ -1940,7 +1943,7 @@ async def kimchi_premium(request: Request, symbol: str = Query(default="BTC", de
 @app.get("/api/v1/stablecoin-premium")
 async def stablecoin_premium(request: Request):
     track_request("stablecoin-premium")
-    log_event("api_call", endpoint="stablecoin-premium", paid=True, price_usd=0.001, ip=get_real_ip(request))
+    log_event("api_call", endpoint="stablecoin-premium", paid=True, price_usd=0.002, ip=get_real_ip(request))
     try:
         fx = await fetch_fx_rate()
         official_rate = fx["rate"]
@@ -1985,7 +1988,7 @@ async def kr_prices(
     exchange: str = Query(default="all", description="Exchange: upbit, bithumb, or all")
 ):
     track_request("kr-prices")
-    log_event("api_call", endpoint="kr-prices", paid=True, price_usd=0.001, ip=get_real_ip(request))
+    log_event("api_call", endpoint="kr-prices", paid=True, price_usd=0.002, ip=get_real_ip(request))
     symbol = validate_symbol(symbol)
     exchange = exchange.lower().strip()
     if exchange not in ("upbit", "bithumb", "all"):
