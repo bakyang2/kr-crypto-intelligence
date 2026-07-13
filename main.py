@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from x402.http.middleware.fastapi import PaymentMiddlewareASGI
 from x402.http import HTTPFacilitatorClient, FacilitatorConfig, PaymentOption
 import anthropic
-from patch_exchange_intel import intel_cache, compute_intel_data, intel_polling_task, load_alert_history, tg_bot_polling
+from patch_exchange_intel import intel_cache, compute_intel_data, intel_polling_task, load_alert_history, tg_bot_polling, calculate_cdp_cost
 from cdp.x402 import create_facilitator_config
 from x402.http.types import RouteConfig
 from x402.server import x402ResourceServer
@@ -644,7 +644,20 @@ async def daily_report_task():
             s = aggregate_stats_range(yesterday_start, yesterday_end)
             date_str = yesterday_midnight_kst.strftime("%Y-%m-%d")
 
-            profit = s["revenue_usd"] - s["claude_cost_usd"]
+            # === CDP facilitator fee (Base settle cost) ===
+            # Coinbase 정책: 월 1000건 무료 + 초과 $0.001/건. 어제가 무료 한도
+            # 경계를 걸친 날일 수도 있어 [월초~어제끝] - [월초~어제시작] 델타로 계산.
+            month_start_kst = yesterday_midnight_kst.replace(day=1)
+            month_start_ts = int(month_start_kst.timestamp())
+            month_through_yesterday = aggregate_stats_range(month_start_ts, yesterday_end)
+            month_before_yesterday = aggregate_stats_range(month_start_ts, yesterday_start)
+            cdp_at_end, cdp_used, cdp_remaining = calculate_cdp_cost(month_through_yesterday["paid_calls"])
+            cdp_before, _, _ = calculate_cdp_cost(month_before_yesterday["paid_calls"])
+            today_cdp_cost = max(0.0, cdp_at_end - cdp_before)
+            month_paid_calls = month_through_yesterday["paid_calls"]
+            month_cdp_excess = max(0, month_paid_calls - 1000)
+
+            profit = s["revenue_usd"] - s["claude_cost_usd"] - today_cdp_cost
 
             # 사용자 활동 분류 (in-memory _daily_user_* 기준 — KST 자정 리셋 직후 호출되므로
             # 이 시점의 데이터는 막 끝난 KST 일자의 활동을 반영)
@@ -679,8 +692,10 @@ async def daily_report_task():
                 f"유료 결제: {s['paid_calls']}건 (${s['revenue_usd']:.4f})\n"
                 f"김프 알림: {s['alerts_sent']}건\n"
                 f"Claude 비용: ${s['claude_cost_usd']:.4f}\n"
+                f"CDP 수수료: ${today_cdp_cost:.4f}\n"
                 f"에러: {s['errors']}건\n\n"
                 f"💰 일 순이익: ${profit:.4f}\n"
+                f"📅 당월 CDP: {month_paid_calls:,}/1,000건 ({month_cdp_excess:,}건 초과, ${cdp_at_end:.4f})\n"
                 f"{'─' * 25}\n\n"
                 f"👥 <b>사용자 활동</b> (in-memory, {total_calls_user}건 / ${total_revenue_user:.4f})\n"
             )
