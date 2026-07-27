@@ -27,6 +27,13 @@ from x402.extensions.bazaar import (
 )
 from x402.mechanisms.svm.exact import ExactSvmServerScheme
 
+# === XRPL (t54 facilitator) ===
+# Path C — isolated to /api/v1/xrpl/* routes. Uses its own middleware
+# (require_payment) and its own PAYMENT-SIGNATURE header (not X-PAYMENT).
+# Coexists with PaymentMiddlewareASGI without interference — the two
+# middlewares watch different paths and different headers.
+from x402_xrpl.server import require_payment as _xrpl_require_payment
+
 from stats_logger import log_event, aggregate_stats, aggregate_stats_range, maybe_archive
 from kr_sentiment import handle_kr_sentiment, load_cache_from_disk as load_sentiment_cache
 from kr_news import fetch_kr_news
@@ -196,7 +203,7 @@ async def tg_send_non_payment(text):
         return
     await tg_send(text)
 
-PAID_ENDPOINTS_LIST = ["/api/v1/kimchi-premium", "/api/v1/kr-prices", "/api/v1/fx-rate", "/api/v1/stablecoin-premium", "/api/v1/market-read", "/api/v1/arbitrage-scanner", "/api/v1/exchange-alerts", "/api/v1/market-movers", "/api/v1/kr-sentiment", "/api/v1/global-vs-korea-divergence", "/api/v1/global-vs-korea-divergence-deep", "/api/v1/kr-news/kpop", "/api/v1/kr-news/kpop-summary", "/api/v1/kr-news/semiconductor", "/api/v1/kr-news/semiconductor-summary"]
+PAID_ENDPOINTS_LIST = ["/api/v1/kimchi-premium", "/api/v1/kr-prices", "/api/v1/fx-rate", "/api/v1/stablecoin-premium", "/api/v1/market-read", "/api/v1/arbitrage-scanner", "/api/v1/exchange-alerts", "/api/v1/market-movers", "/api/v1/kr-sentiment", "/api/v1/global-vs-korea-divergence", "/api/v1/global-vs-korea-divergence-deep", "/api/v1/kr-news/kpop", "/api/v1/kr-news/kpop-summary", "/api/v1/kr-news/semiconductor", "/api/v1/kr-news/semiconductor-summary", "/api/v1/xrpl/kr-prices"]
 
 
 def _network_label(network: str) -> str:
@@ -210,6 +217,8 @@ def _network_label(network: str) -> str:
         return "Polygon"
     if n.startswith("solana:"):
         return "Solana"
+    if n.startswith("xrpl:"):
+        return "XRPL"
     if n.startswith("eip155:"):
         return f"EVM({network.split(':',1)[1]})"
     return network
@@ -243,6 +252,7 @@ async def tg_notify_request(endpoint, symbol, ip, status_code=200, network=None,
         "/api/v1/kr-news/kpop-summary": "$0.05",
         "/api/v1/kr-news/semiconductor": "$0.02",
         "/api/v1/kr-news/semiconductor-summary": "$0.10",
+        "/api/v1/xrpl/kr-prices": "$0.002",
     }
     price = price_map.get(endpoint, "$0.001")  # fx-rate falls through here at $0.001
     price_value = float(price.replace("$", ""))
@@ -775,6 +785,20 @@ SOLANA_NETWORK = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
 POLYGON_NETWORK = "eip155:137"
 FACILITATOR_URL = "https://api.cdp.coinbase.com/platform/v2/x402"
 
+# === XRPL merchant setup (Path C — /api/v1/xrpl/* isolated routes) ===
+# payTo address is public (safe in env). Seed never on server — merchant only
+# receives, doesn't sign. RLUSD issuer is fixed on mainnet (on-chain verified:
+# Domain=https://ripple.com/, issues currency 524C555344...), kept as a constant
+# rather than env so an accidental env misconfiguration cannot silently misroute
+# funds to a wrong issuer.
+XRPL_MERCHANT_ADDR = os.getenv("XRPL_PAY_TO", "").strip()
+XRPL_FACILITATOR_URL = os.getenv("XRPL_FACILITATOR_URL", "https://xrpl-facilitator-mainnet.t54.ai")
+XRPL_NETWORK = os.getenv("XRPL_NETWORK", "xrpl:0")   # mainnet
+XRPL_RLUSD_ISSUER_MAINNET = "rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De"   # Ripple, verified on-chain
+XRPL_RLUSD_HEX = "524C555344000000000000000000000000000000"
+XRPL_SOURCE_TAG = 804681468   # x402watch indexing standard
+XRPL_PROTECTED_PATHS = ["/api/v1/xrpl/kr-prices"]  # Path C — expand cautiously
+
 cdp_config = create_facilitator_config()
 x402_server = x402ResourceServer(
     HTTPFacilitatorClient(cdp_config)
@@ -1303,6 +1327,7 @@ PAID_ENDPOINTS_PRICING = {
     "/api/v1/global-vs-korea-divergence-deep": "0.100000",
     "/api/v1/market-read": "0.100000",
     "/api/v1/kr-news/semiconductor-summary": "0.100000",
+    "/api/v1/xrpl/kr-prices": "0.002000",
 }
 
 FREE_ENDPOINTS = [
@@ -1397,6 +1422,31 @@ for _route_key, _rc in x402_routes.items():
 
 # x402 결제 미들웨어 적용
 app.add_middleware(PaymentMiddlewareASGI, routes=x402_routes, server=x402_server)
+
+# XRPL Path C middleware — isolated to /api/v1/xrpl/* only. Passes through
+# every request that is not in XRPL_PROTECTED_PATHS (SDK-internal path filter),
+# so it never touches Base/Polygon/Solana flows. Watches PAYMENT-SIGNATURE
+# header, which is orthogonal to X-PAYMENT used by PaymentMiddlewareASGI.
+# Skipped entirely (no middleware wiring) when XRPL_MERCHANT_ADDR is empty,
+# so a missing/misconfigured .env does not accidentally register the route.
+if XRPL_MERCHANT_ADDR:
+    app.middleware("http")(
+        _xrpl_require_payment(
+            path=XRPL_PROTECTED_PATHS,
+            price="0.002",   # RLUSD (IOU) — decimal-value string
+            pay_to_address=XRPL_MERCHANT_ADDR,
+            facilitator_url=XRPL_FACILITATOR_URL,
+            network=XRPL_NETWORK,
+            asset=XRPL_RLUSD_HEX,
+            issuer=XRPL_RLUSD_ISSUER_MAINNET,
+            source_tag=XRPL_SOURCE_TAG,
+            description="KR Crypto — Korean exchange prices (Upbit, Bithumb) via XRPL / RLUSD",
+            mime_type="application/json",
+        )
+    )
+    print(f"[XRPL] require_payment registered for {XRPL_PROTECTED_PATHS} → {XRPL_MERCHANT_ADDR}")
+else:
+    print("[XRPL] skipped: XRPL_PAY_TO not set in .env")
 
 from starlette.responses import Response as _StarletteResponse
 
@@ -1543,10 +1593,12 @@ async def rate_limit_middleware(request: Request, call_next):
     ip = get_real_ip(request)
     # x402 discovery probes: unpaid GETs to paid endpoints receive the cheap,
     # static 402 challenge without consuming rate-limit quota. Requests carrying
-    # X-PAYMENT (actual settlement attempts) remain rate-limited.
+    # X-PAYMENT (EVM/SVM) or PAYMENT-SIGNATURE (XRPL/t54) — i.e. actual
+    # settlement attempts — remain rate-limited.
     x402_probe = (request.method == "GET"
                   and request.url.path in PAID_ENDPOINTS_LIST
-                  and "x-payment" not in request.headers)
+                  and "x-payment" not in request.headers
+                  and "payment-signature" not in request.headers)
     if not x402_probe and not check_rate_limit(ip):
         return _apply_cors_headers(JSONResponse(status_code=429, content={"detail": "Rate limit exceeded. Max 60 requests per minute.", "retry_after_seconds": 60}))
     response = await call_next(request)
@@ -1590,13 +1642,21 @@ async def rate_limit_middleware(request: Request, call_next):
                 except Exception:
                     data = None
                 if isinstance(data, dict):
+                    # Per-chain merchant address. XRPL uses its own payTo (r...);
+                    # everything else (Base/Polygon/Solana) keeps the historical
+                    # WALLET_ADDRESS mapping unchanged.
+                    _merchant_for_receipt = (
+                        XRPL_MERCHANT_ADDR
+                        if endpoint.startswith("/api/v1/xrpl/") and XRPL_MERCHANT_ADDR
+                        else WALLET_ADDRESS
+                    )
                     try:
                         data["receipt"] = _create_receipt(
                             endpoint=endpoint,
                             network=network or "unknown",
                             tx_hash=transaction or "",
                             payer=payer or "",
-                            merchant=WALLET_ADDRESS,
+                            merchant=_merchant_for_receipt,
                         )
                     except Exception as e:
                         print(f"[RECEIPT] generation failed for {endpoint}: {e}")
@@ -2022,6 +2082,42 @@ async def kr_prices(
     if all("error" in v for v in results.values()):
         stats["errors"] += 1
     return {"symbol": symbol, "data": results, "timestamp": int(time.time() * 1000)}
+
+
+# === XRPL variant (Path C — kr-prices only, initial experiment) =============
+# Settle is handled by the x402-xrpl require_payment middleware registered
+# above; by the time this handler runs, RLUSD has already been received.
+# Logic is a minimal copy of kr_prices() rather than a direct call, so:
+#   - the api_call log carries endpoint="xrpl/kr-prices" (chain-separated
+#     revenue accounting in the daily report), not "kr-prices"
+#   - the original handler is not double-counted
+@app.get("/api/v1/xrpl/kr-prices")
+async def kr_prices_xrpl(
+    request: Request,
+    symbol: str = Query(default="BTC", description="Crypto symbol"),
+    exchange: str = Query(default="all", description="Exchange: upbit, bithumb, or all")
+):
+    track_request("xrpl/kr-prices")
+    log_event("api_call", endpoint="xrpl/kr-prices", paid=True, price_usd=0.002, ip=get_real_ip(request))
+    symbol = validate_symbol(symbol)
+    exchange = exchange.lower().strip()
+    if exchange not in ("upbit", "bithumb", "all"):
+        raise HTTPException(status_code=400, detail=f"Unknown exchange: '{exchange}'. Use 'upbit', 'bithumb', or 'all'.")
+    results = {}
+    if exchange in ("upbit", "all"):
+        try:
+            results["upbit"] = await fetch_upbit_price(symbol)
+        except Exception as e:
+            results["upbit"] = {"error": f"Upbit request failed: {type(e).__name__}"}
+    if exchange in ("bithumb", "all"):
+        try:
+            results["bithumb"] = await fetch_bithumb_price(symbol)
+        except Exception as e:
+            results["bithumb"] = {"error": f"Bithumb request failed: {type(e).__name__}"}
+    if all("error" in v for v in results.values()):
+        stats["errors"] += 1
+    return {"symbol": symbol, "data": results, "timestamp": int(time.time() * 1000)}
+
 
 @app.get("/api/v1/fx-rate")
 async def fx_rate_endpoint(request: Request):

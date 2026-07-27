@@ -92,6 +92,7 @@ ENDPOINT_PRICES = {
     "/api/v1/kr-news/kpop-summary": "0.05",
     "/api/v1/kr-news/semiconductor": "0.02",
     "/api/v1/kr-news/semiconductor-summary": "0.10",
+    "/api/v1/xrpl/kr-prices": "0.002",
 }
 
 
