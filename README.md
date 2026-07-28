@@ -1,6 +1,6 @@
 # KR Crypto Intelligence API
 
-Korean crypto market data + AI analysis for AI agents. 15 paid endpoints (11 crypto + 4 Korean news), 180+ tokens, world's first Korean-to-English crypto sentiment API. Pay-per-use via x402 protocol on Base, Polygon, and Solana. AWS Bedrock AgentCore-ready.
+Korean crypto market data + AI analysis for AI agents. 15 paid endpoints (11 crypto + 4 Korean news), 180+ tokens, world's first Korean-to-English crypto sentiment API. Pay-per-use via x402 protocol on Base, Polygon, Solana, and XRPL. AWS Bedrock AgentCore-ready.
 
 ## Endpoints (15 paid)
 
@@ -103,6 +103,9 @@ Uses the [x402 protocol](https://x402.org) for micropayments. No API key, no sub
 - **Base:** USDC on Base mainnet (eip155:8453)
 - **Polygon:** USDC on Polygon mainnet (eip155:137)
 - **Solana:** USDC on Solana mainnet
+- **XRPL:** RLUSD on XRPL mainnet (xrpl:0) — via `/api/v1/xrpl/<endpoint>` variants
+
+All paid endpoints are also available via `/api/v1/xrpl/<endpoint>` for XRPL/RLUSD settlement (same prices, same responses).
 
 ## Data Sources
 
@@ -122,7 +125,7 @@ KR Crypto Intelligence is x402-native and ready to be discovered by AWS Bedrock 
 
 Bedrock-powered agents can:
 - Discover all 11 endpoints via `.well-known/x402` and CDP MCP
-- Pay autonomously with USDC on Base, Polygon, or Solana
+- Pay autonomously with USDC on Base, Polygon, or Solana — or RLUSD on XRPL
 - Access without API keys, signups, or human approval
 
 **Discovery endpoint**: `https://api.printmoneylab.com/.well-known/x402`  
@@ -176,9 +179,9 @@ assert recovered.lower() == receipt["signer"].lower()
 | id | Unique receipt identifier (rcpt_YYYYMMDD_xxxxxx) |
 | issued_at | ISO 8601 timestamp |
 | endpoint | API path that was paid for |
-| amount | Payment amount in USDC |
-| currency | "USDC" |
-| network | "eip155:8453" (Base) or "solana:..." |
+| amount | Payment amount (USDC on Base/Polygon/Solana, RLUSD on XRPL) |
+| currency | "USDC" or "RLUSD" |
+| network | "eip155:8453" (Base), "eip155:137" (Polygon), "solana:..." or "xrpl:0" |
 | tx_hash | On-chain transaction hash |
 | payer | Buyer's wallet address |
 | merchant | KR Crypto's wallet address |

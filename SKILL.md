@@ -1,6 +1,6 @@
 ---
 name: kr-crypto-intelligence
-description: Korean crypto market data + AI analysis for trading agents. 13 tools — dual-basis Kimchi Premium (official USD/KRW + USDT live rate) across 180+ tokens, exchange intelligence, AI sentiment analysis (world's first Korean-to-English), Global vs Korea divergence with structured AI breakdown, market alerts. x402 on Base, Polygon, and Solana.
+description: Korean crypto market data + AI analysis for trading agents. 13 tools — dual-basis Kimchi Premium (official USD/KRW + USDT live rate) across 180+ tokens, exchange intelligence, AI sentiment analysis (world's first Korean-to-English), Global vs Korea divergence with structured AI breakdown, market alerts. x402 on Base, Polygon, Solana, and XRPL.
 version: 1.4.2
 homepage: https://github.com/bakyang2/kr-crypto-intelligence
 repository: https://github.com/bakyang2/kr-crypto-intelligence
@@ -87,9 +87,11 @@ Note: Like any HTTP service, the server receives standard HTTP metadata (IP addr
 1. Agent calls a paid endpoint (e.g., `get_kimchi_premium`)
 2. Server returns HTTP 402 with price in the `payment-required` header
 3. **The MCP client or platform decides whether to pay** — this is NOT automatic
-4. If the client approves, it signs a USDC transfer for the exact amount on Base, Polygon, or Solana
-5. Client retries with payment proof in `X-PAYMENT` header
+4. If the client approves, it signs a USDC transfer on Base, Polygon, or Solana — or an RLUSD transfer on XRPL — for the exact amount
+5. Client retries with payment proof (`X-PAYMENT` header for EVM/Solana, `PAYMENT-SIGNATURE` for XRPL)
 6. Server verifies payment and returns data
+
+All paid endpoints are also reachable via `/api/v1/xrpl/<endpoint>` for XRPL/RLUSD settlement (same prices, same responses).
 
 **Key points:**
 - **Payment is NOT automatic.** The agent's MCP client (e.g., xpay Smart Proxy, Claude, Cursor) controls whether to authorize payment.

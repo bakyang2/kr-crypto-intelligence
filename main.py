@@ -1416,8 +1416,8 @@ def custom_openapi():
         "Use GET /api/v1/kr-sentiment for Korean market sentiment in English. "
         "Use GET /api/v1/kr-news/kpop for K-pop news translated to English. "
         "Use GET /api/v1/kr-news/semiconductor for Korean semiconductor industry news. "
-        "All paid endpoints require x402 payment ($0.001-$0.10 USDC). "
-        "Networks: Base, Polygon, Solana. "
+        "All paid endpoints require x402 payment ($0.001-$0.10 in USDC or RLUSD). "
+        "Networks: Base, Polygon, Solana (USDC), XRPL (RLUSD via /api/v1/xrpl/<endpoint>). "
         "Every paid response includes signed receipt (ECDSA secp256k1) for agent accountability."
     )
 
@@ -1863,7 +1863,7 @@ async def x402_manifest():
 
 LLMS_TXT_CONTENT = """# KR Crypto Intelligence API
 
-> Korean crypto market data + AI sentiment analysis for AI agents. Pay per request via x402 on Base, Polygon, and Solana.
+> Korean crypto market data + AI sentiment analysis for AI agents. Pay per request via x402 on Base, Polygon, Solana, and XRPL. The only Korean crypto market data provider on XRPL — payable in RLUSD.
 > API: https://api.printmoneylab.com
 > MCP: https://mcp.printmoneylab.com/mcp
 > Docs: https://api.printmoneylab.com/docs
@@ -1874,7 +1874,8 @@ LLMS_TXT_CONTENT = """# KR Crypto Intelligence API
 Every endpoint is callable via the x402 payment protocol.
 Your agent sends a standard HTTP request; when payment is required,
 it receives HTTP 402 with payment instructions. No API keys, no accounts,
-no registration. Payment is settled per-request in USDC.
+no registration. Payment is settled per-request in USDC (on Base, Polygon,
+or Solana) or RLUSD (on XRPL — via /api/v1/xrpl/<endpoint> variants).
 
 ## How AI agents pay
 
@@ -1887,19 +1888,25 @@ This API uses x402 micropayments (HTTP 402 Payment Required protocol).
    - Pay.sh (Google Cloud / Solana Foundation): https://pay.sh
    - x402 SDK (TypeScript / Python / Go / Java): https://github.com/coinbase/x402
 2. Fund your wallet:
-   - USDC on Base, Polygon, or Solana mainnet
+   - USDC on Base, Polygon, or Solana mainnet, OR
+   - RLUSD on XRPL mainnet (for /api/v1/xrpl/<endpoint> variants)
    - Minimum $0.10 recommended for testing
-   - Each API call costs $0.001 to $0.10
+   - Each API call costs $0.001 to $0.10 (same tiers on all chains)
 3. Call any paid endpoint:
    - First call returns HTTP 402 with payment challenge
-   - Client signs USDC transfer (handled automatically)
-   - Retry with X-PAYMENT header gets data
+   - Client signs a stablecoin transfer (USDC or RLUSD; handled automatically)
+   - Retry with X-PAYMENT (EVM/Solana) or PAYMENT-SIGNATURE (XRPL) header gets data
+
+All paid endpoints are also reachable via /api/v1/xrpl/<endpoint> for
+XRPL/RLUSD settlement — same prices, same responses.
 
 ### Merchant wallets
 
 - Base mainnet: 0xcF9223eCe895258dEa8D288AEBcf846Ab8E342fB
 - Polygon mainnet: 0xcF9223eCe895258dEa8D288AEBcf846Ab8E342fB
 - Solana mainnet: 3Ywxk31SvWKwZBdY6bLvjmn5h4mzWcT3HJ5UZbYXoVy9
+- XRPL mainnet: raKj7ZGoPy1fWw1vfynuJhyHirpcmUMBhP
+- RLUSD issuer (XRPL): rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De
 
 ### Receipt verification
 
