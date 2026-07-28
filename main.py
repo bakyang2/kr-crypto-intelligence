@@ -1758,7 +1758,8 @@ async def x402_manifest():
             {"path": "/api/v1/kr-news/kpop", "method": "GET", "price": "$0.01", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean K-pop news (Naver-aggregated) translated to English with AI relevance classification. Headlines + summary_en + source_en/source_kr."},
             {"path": "/api/v1/kr-news/kpop-summary", "method": "GET", "price": "$0.05", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean K-pop news + AI synthesis (sentiment, key themes, trending entities). Sonnet 4.6 paragraph summary."},
             {"path": "/api/v1/kr-news/semiconductor", "method": "GET", "price": "$0.02", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean semiconductor industry news (Samsung/SK Hynix/HBM/foundry) translated to English with AI relevance classification."},
-            {"path": "/api/v1/kr-news/semiconductor-summary", "method": "GET", "price": "$0.10", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean semiconductor news + AI market synthesis with market_signal (bullish/bearish/neutral). Sonnet 4.6."}
+            {"path": "/api/v1/kr-news/semiconductor-summary", "method": "GET", "price": "$0.10", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean semiconductor news + AI market synthesis with market_signal (bullish/bearish/neutral). Sonnet 4.6."},
+            {"path": "/api/v1/xrpl/kr-prices", "method": "GET", "price": "$0.002", "networks": ["xrpl:0"], "description": "Korean exchange prices (Upbit, Bithumb) — XRPL/RLUSD"}
         ],
         "free_endpoints": [
             {"path": "/api/v1/symbols", "method": "GET", "description": "Available trading symbols"},
