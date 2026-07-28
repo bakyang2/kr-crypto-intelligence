@@ -108,13 +108,16 @@ def _today_yyyymmdd() -> str:
 
 
 def create_receipt(endpoint: str, network: str, tx_hash: str, payer: str,
-                   merchant: str) -> dict:
+                   merchant: str, currency: str = "USDC") -> dict:
     """Build + sign a receipt. Raises if anything goes wrong; callers should
-    catch and emit `_meta.receipt_status: generation_failed`."""
+    catch and emit `_meta.receipt_status: generation_failed`.
+
+    `currency` defaults to "USDC" (Base/Polygon/Solana). Callers on XRPL
+    routes MUST pass currency="RLUSD" — dispatched per-endpoint in main.py
+    alongside the merchant address dispatch (F5)."""
     issued_at = _now_iso_utc()
     rcpt_id = f"rcpt_{_today_yyyymmdd()}_{secrets.token_hex(3)}"
     amount = ENDPOINT_PRICES.get(endpoint, "0.001")
-    currency = "USDC"
     network_s = network or "unknown"
     tx_s = tx_hash or ""
     payer_s = payer or ""

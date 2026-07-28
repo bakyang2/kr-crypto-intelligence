@@ -1642,14 +1642,17 @@ async def rate_limit_middleware(request: Request, call_next):
                 except Exception:
                     data = None
                 if isinstance(data, dict):
-                    # Per-chain merchant address. XRPL uses its own payTo (r...);
-                    # everything else (Base/Polygon/Solana) keeps the historical
-                    # WALLET_ADDRESS mapping unchanged.
+                    # Per-chain merchant address + currency. XRPL uses its
+                    # own payTo (r...) and RLUSD IOU; everything else
+                    # (Base/Polygon/Solana) keeps the historical WALLET_ADDRESS
+                    # + USDC mapping unchanged.
+                    _is_xrpl = endpoint.startswith("/api/v1/xrpl/")
                     _merchant_for_receipt = (
                         XRPL_MERCHANT_ADDR
-                        if endpoint.startswith("/api/v1/xrpl/") and XRPL_MERCHANT_ADDR
+                        if _is_xrpl and XRPL_MERCHANT_ADDR
                         else WALLET_ADDRESS
                     )
+                    _currency_for_receipt = "RLUSD" if _is_xrpl else "USDC"
                     try:
                         data["receipt"] = _create_receipt(
                             endpoint=endpoint,
@@ -1657,6 +1660,7 @@ async def rate_limit_middleware(request: Request, call_next):
                             tx_hash=transaction or "",
                             payer=payer or "",
                             merchant=_merchant_for_receipt,
+                            currency=_currency_for_receipt,
                         )
                     except Exception as e:
                         print(f"[RECEIPT] generation failed for {endpoint}: {e}")
