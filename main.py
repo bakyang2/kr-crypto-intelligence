@@ -203,7 +203,20 @@ async def tg_send_non_payment(text):
         return
     await tg_send(text)
 
-PAID_ENDPOINTS_LIST = ["/api/v1/kimchi-premium", "/api/v1/kr-prices", "/api/v1/fx-rate", "/api/v1/stablecoin-premium", "/api/v1/market-read", "/api/v1/arbitrage-scanner", "/api/v1/exchange-alerts", "/api/v1/market-movers", "/api/v1/kr-sentiment", "/api/v1/global-vs-korea-divergence", "/api/v1/global-vs-korea-divergence-deep", "/api/v1/kr-news/kpop", "/api/v1/kr-news/kpop-summary", "/api/v1/kr-news/semiconductor", "/api/v1/kr-news/semiconductor-summary", "/api/v1/xrpl/kr-prices"]
+PAID_ENDPOINTS_LIST = [
+    "/api/v1/kimchi-premium", "/api/v1/kr-prices", "/api/v1/fx-rate", "/api/v1/stablecoin-premium",
+    "/api/v1/market-read", "/api/v1/arbitrage-scanner", "/api/v1/exchange-alerts", "/api/v1/market-movers",
+    "/api/v1/kr-sentiment", "/api/v1/global-vs-korea-divergence", "/api/v1/global-vs-korea-divergence-deep",
+    "/api/v1/kr-news/kpop", "/api/v1/kr-news/kpop-summary", "/api/v1/kr-news/semiconductor",
+    "/api/v1/kr-news/semiconductor-summary",
+    # XRPL variants (Path C) — RLUSD via t54 mainnet facilitator
+    "/api/v1/xrpl/kimchi-premium", "/api/v1/xrpl/kr-prices", "/api/v1/xrpl/fx-rate", "/api/v1/xrpl/stablecoin-premium",
+    "/api/v1/xrpl/market-read", "/api/v1/xrpl/arbitrage-scanner", "/api/v1/xrpl/exchange-alerts",
+    "/api/v1/xrpl/market-movers", "/api/v1/xrpl/kr-sentiment", "/api/v1/xrpl/global-vs-korea-divergence",
+    "/api/v1/xrpl/global-vs-korea-divergence-deep", "/api/v1/xrpl/kr-news/kpop",
+    "/api/v1/xrpl/kr-news/kpop-summary", "/api/v1/xrpl/kr-news/semiconductor",
+    "/api/v1/xrpl/kr-news/semiconductor-summary",
+]
 
 
 def _network_label(network: str) -> str:
@@ -252,7 +265,22 @@ async def tg_notify_request(endpoint, symbol, ip, status_code=200, network=None,
         "/api/v1/kr-news/kpop-summary": "$0.05",
         "/api/v1/kr-news/semiconductor": "$0.02",
         "/api/v1/kr-news/semiconductor-summary": "$0.10",
+        # XRPL variants — 1:1 mirror of EVM prices
+        "/api/v1/xrpl/kimchi-premium": "$0.002",
         "/api/v1/xrpl/kr-prices": "$0.002",
+        "/api/v1/xrpl/stablecoin-premium": "$0.002",
+        "/api/v1/xrpl/arbitrage-scanner": "$0.01",
+        "/api/v1/xrpl/exchange-alerts": "$0.01",
+        "/api/v1/xrpl/market-movers": "$0.01",
+        "/api/v1/xrpl/kr-news/kpop": "$0.01",
+        "/api/v1/xrpl/kr-news/semiconductor": "$0.02",
+        "/api/v1/xrpl/kr-sentiment": "$0.05",
+        "/api/v1/xrpl/global-vs-korea-divergence": "$0.05",
+        "/api/v1/xrpl/kr-news/kpop-summary": "$0.05",
+        "/api/v1/xrpl/global-vs-korea-divergence-deep": "$0.10",
+        "/api/v1/xrpl/market-read": "$0.10",
+        "/api/v1/xrpl/kr-news/semiconductor-summary": "$0.10",
+        # fx-rate XRPL variant falls through to default "$0.001" like EVM fx-rate
     }
     price = price_map.get(endpoint, "$0.001")  # fx-rate falls through here at $0.001
     price_value = float(price.replace("$", ""))
@@ -797,7 +825,23 @@ XRPL_NETWORK = os.getenv("XRPL_NETWORK", "xrpl:0")   # mainnet
 XRPL_RLUSD_ISSUER_MAINNET = "rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De"   # Ripple, verified on-chain
 XRPL_RLUSD_HEX = "524C555344000000000000000000000000000000"
 XRPL_SOURCE_TAG = 804681468   # x402watch indexing standard
-XRPL_PROTECTED_PATHS = ["/api/v1/xrpl/kr-prices"]  # Path C — expand cautiously
+# Path C XRPL variants grouped by price. Each require_payment instance
+# advertises a single (amount, asset, pay_to, network) — the SDK does not
+# support per-path pricing inside one middleware, so we register one
+# middleware per price bucket (6 total, covering all 15 XRPL routes).
+XRPL_PRICE_GROUPS = {
+    "0.001": ["/api/v1/xrpl/fx-rate"],
+    "0.002": ["/api/v1/xrpl/kimchi-premium", "/api/v1/xrpl/kr-prices", "/api/v1/xrpl/stablecoin-premium"],
+    "0.01":  ["/api/v1/xrpl/arbitrage-scanner", "/api/v1/xrpl/exchange-alerts",
+              "/api/v1/xrpl/market-movers", "/api/v1/xrpl/kr-news/kpop"],
+    "0.02":  ["/api/v1/xrpl/kr-news/semiconductor"],
+    "0.05":  ["/api/v1/xrpl/kr-sentiment", "/api/v1/xrpl/global-vs-korea-divergence",
+              "/api/v1/xrpl/kr-news/kpop-summary"],
+    "0.10":  ["/api/v1/xrpl/global-vs-korea-divergence-deep", "/api/v1/xrpl/market-read",
+              "/api/v1/xrpl/kr-news/semiconductor-summary"],
+}
+# Flat list for use in PAID_ENDPOINTS_LIST-adjacent audit/regression checks.
+XRPL_PROTECTED_PATHS = [p for paths in XRPL_PRICE_GROUPS.values() for p in paths]
 
 cdp_config = create_facilitator_config()
 x402_server = x402ResourceServer(
@@ -1327,7 +1371,22 @@ PAID_ENDPOINTS_PRICING = {
     "/api/v1/global-vs-korea-divergence-deep": "0.100000",
     "/api/v1/market-read": "0.100000",
     "/api/v1/kr-news/semiconductor-summary": "0.100000",
+    # XRPL variants — 6-decimal string mirror of EVM PAID_ENDPOINTS_PRICING
+    "/api/v1/xrpl/kimchi-premium": "0.002000",
     "/api/v1/xrpl/kr-prices": "0.002000",
+    "/api/v1/xrpl/fx-rate": "0.001000",
+    "/api/v1/xrpl/stablecoin-premium": "0.002000",
+    "/api/v1/xrpl/arbitrage-scanner": "0.010000",
+    "/api/v1/xrpl/exchange-alerts": "0.010000",
+    "/api/v1/xrpl/market-movers": "0.010000",
+    "/api/v1/xrpl/kr-news/kpop": "0.010000",
+    "/api/v1/xrpl/kr-news/semiconductor": "0.020000",
+    "/api/v1/xrpl/global-vs-korea-divergence": "0.050000",
+    "/api/v1/xrpl/kr-sentiment": "0.050000",
+    "/api/v1/xrpl/kr-news/kpop-summary": "0.050000",
+    "/api/v1/xrpl/global-vs-korea-divergence-deep": "0.100000",
+    "/api/v1/xrpl/market-read": "0.100000",
+    "/api/v1/xrpl/kr-news/semiconductor-summary": "0.100000",
 }
 
 FREE_ENDPOINTS = [
@@ -1424,27 +1483,36 @@ for _route_key, _rc in x402_routes.items():
 app.add_middleware(PaymentMiddlewareASGI, routes=x402_routes, server=x402_server)
 
 # XRPL Path C middleware — isolated to /api/v1/xrpl/* only. Passes through
-# every request that is not in XRPL_PROTECTED_PATHS (SDK-internal path filter),
-# so it never touches Base/Polygon/Solana flows. Watches PAYMENT-SIGNATURE
-# header, which is orthogonal to X-PAYMENT used by PaymentMiddlewareASGI.
+# every request that is not in the path set of a given require_payment call
+# (SDK-internal path filter), so it never touches Base/Polygon/Solana flows.
+# Watches PAYMENT-SIGNATURE header, which is orthogonal to X-PAYMENT used by
+# PaymentMiddlewareASGI.
+#
+# One require_payment instance per price bucket — the SDK does not support
+# per-path pricing inside a single middleware, and 15 endpoints span 6 prices
+# ($0.001 / $0.002 / $0.01 / $0.02 / $0.05 / $0.10). Middleware order is
+# irrelevant because each instance short-circuits on paths it doesn't own.
+#
 # Skipped entirely (no middleware wiring) when XRPL_MERCHANT_ADDR is empty,
-# so a missing/misconfigured .env does not accidentally register the route.
+# so a missing/misconfigured .env does not accidentally register any route.
 if XRPL_MERCHANT_ADDR:
-    app.middleware("http")(
-        _xrpl_require_payment(
-            path=XRPL_PROTECTED_PATHS,
-            price="0.002",   # RLUSD (IOU) — decimal-value string
-            pay_to_address=XRPL_MERCHANT_ADDR,
-            facilitator_url=XRPL_FACILITATOR_URL,
-            network=XRPL_NETWORK,
-            asset=XRPL_RLUSD_HEX,
-            issuer=XRPL_RLUSD_ISSUER_MAINNET,
-            source_tag=XRPL_SOURCE_TAG,
-            description="KR Crypto — Korean exchange prices (Upbit, Bithumb) via XRPL / RLUSD",
-            mime_type="application/json",
+    for _xrpl_price, _xrpl_paths in XRPL_PRICE_GROUPS.items():
+        app.middleware("http")(
+            _xrpl_require_payment(
+                path=_xrpl_paths,
+                price=_xrpl_price,   # RLUSD (IOU) — decimal-value string
+                pay_to_address=XRPL_MERCHANT_ADDR,
+                facilitator_url=XRPL_FACILITATOR_URL,
+                network=XRPL_NETWORK,
+                asset=XRPL_RLUSD_HEX,
+                issuer=XRPL_RLUSD_ISSUER_MAINNET,
+                source_tag=XRPL_SOURCE_TAG,
+                description=f"KR Crypto — XRPL / RLUSD ({_xrpl_price} RLUSD tier)",
+                mime_type="application/json",
+            )
         )
-    )
-    print(f"[XRPL] require_payment registered for {XRPL_PROTECTED_PATHS} → {XRPL_MERCHANT_ADDR}")
+    print(f"[XRPL] require_payment registered for {len(XRPL_PROTECTED_PATHS)} paths "
+          f"across {len(XRPL_PRICE_GROUPS)} price buckets → {XRPL_MERCHANT_ADDR}")
 else:
     print("[XRPL] skipped: XRPL_PAY_TO not set in .env")
 
@@ -1763,7 +1831,21 @@ async def x402_manifest():
             {"path": "/api/v1/kr-news/kpop-summary", "method": "GET", "price": "$0.05", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean K-pop news + AI synthesis (sentiment, key themes, trending entities). Sonnet 4.6 paragraph summary."},
             {"path": "/api/v1/kr-news/semiconductor", "method": "GET", "price": "$0.02", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean semiconductor industry news (Samsung/SK Hynix/HBM/foundry) translated to English with AI relevance classification."},
             {"path": "/api/v1/kr-news/semiconductor-summary", "method": "GET", "price": "$0.10", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean semiconductor news + AI market synthesis with market_signal (bullish/bearish/neutral). Sonnet 4.6."},
-            {"path": "/api/v1/xrpl/kr-prices", "method": "GET", "price": "$0.002", "networks": ["xrpl:0"], "description": "Korean exchange prices (Upbit, Bithumb) — XRPL/RLUSD"}
+            {"path": "/api/v1/xrpl/kimchi-premium", "method": "GET", "price": "$0.002", "networks": ["xrpl:0"], "description": "Real-time Kimchi Premium — XRPL/RLUSD"},
+            {"path": "/api/v1/xrpl/kr-prices", "method": "GET", "price": "$0.002", "networks": ["xrpl:0"], "description": "Korean exchange prices (Upbit, Bithumb) — XRPL/RLUSD"},
+            {"path": "/api/v1/xrpl/fx-rate", "method": "GET", "price": "$0.001", "networks": ["xrpl:0"], "description": "USD/KRW exchange rate — XRPL/RLUSD"},
+            {"path": "/api/v1/xrpl/stablecoin-premium", "method": "GET", "price": "$0.002", "networks": ["xrpl:0"], "description": "USDT/USDC premium on Korean exchanges — XRPL/RLUSD"},
+            {"path": "/api/v1/xrpl/arbitrage-scanner", "method": "GET", "price": "$0.01", "networks": ["xrpl:0"], "description": "189+ token Kimchi Premium scanner — XRPL/RLUSD"},
+            {"path": "/api/v1/xrpl/exchange-alerts", "method": "GET", "price": "$0.01", "networks": ["xrpl:0"], "description": "Korean exchange alerts (listings, warnings, cautions) — XRPL/RLUSD"},
+            {"path": "/api/v1/xrpl/market-movers", "method": "GET", "price": "$0.01", "networks": ["xrpl:0"], "description": "1-min movers + volume spikes — XRPL/RLUSD"},
+            {"path": "/api/v1/xrpl/market-read", "method": "GET", "price": "$0.10", "networks": ["xrpl:0"], "description": "Full market AI synthesis (12+ sources) — XRPL/RLUSD"},
+            {"path": "/api/v1/xrpl/kr-sentiment", "method": "GET", "price": "$0.05", "networks": ["xrpl:0"], "description": "Korean crypto sentiment (news + AI) — XRPL/RLUSD"},
+            {"path": "/api/v1/xrpl/global-vs-korea-divergence", "method": "GET", "price": "$0.05", "networks": ["xrpl:0"], "description": "Global vs Korea divergence (light AI) — XRPL/RLUSD"},
+            {"path": "/api/v1/xrpl/global-vs-korea-divergence-deep", "method": "GET", "price": "$0.10", "networks": ["xrpl:0"], "description": "Global vs Korea divergence (deep AI + news) — XRPL/RLUSD"},
+            {"path": "/api/v1/xrpl/kr-news/kpop", "method": "GET", "price": "$0.01", "networks": ["xrpl:0"], "description": "Korean K-pop news translated to English — XRPL/RLUSD"},
+            {"path": "/api/v1/xrpl/kr-news/kpop-summary", "method": "GET", "price": "$0.05", "networks": ["xrpl:0"], "description": "Korean K-pop news + AI synthesis — XRPL/RLUSD"},
+            {"path": "/api/v1/xrpl/kr-news/semiconductor", "method": "GET", "price": "$0.02", "networks": ["xrpl:0"], "description": "Korean semiconductor industry news — XRPL/RLUSD"},
+            {"path": "/api/v1/xrpl/kr-news/semiconductor-summary", "method": "GET", "price": "$0.10", "networks": ["xrpl:0"], "description": "Korean semiconductor news + AI market synthesis — XRPL/RLUSD"}
         ],
         "free_endpoints": [
             {"path": "/api/v1/symbols", "method": "GET", "description": "Available trading symbols"},
@@ -1773,7 +1855,8 @@ async def x402_manifest():
         "payment": [
             {"scheme": "exact", "network": "eip155:8453", "asset": "USDC", "payTo": "0xcF9223eCe895258dEa8D288AEBcf846Ab8E342fB"},
             {"scheme": "exact", "network": "eip155:137", "asset": "USDC", "payTo": "0xcF9223eCe895258dEa8D288AEBcf846Ab8E342fB"},
-            {"scheme": "exact", "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "asset": "USDC", "payTo": "3Ywxk31SvWKwZBdY6bLvjmn5h4mzWcT3HJ5UZbYXoVy9"}
+            {"scheme": "exact", "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "asset": "USDC", "payTo": "3Ywxk31SvWKwZBdY6bLvjmn5h4mzWcT3HJ5UZbYXoVy9"},
+            {"scheme": "exact", "network": "xrpl:0", "asset": "RLUSD", "payTo": "raKj7ZGoPy1fWw1vfynuJhyHirpcmUMBhP", "issuer": "rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De"}
         ],
         "tags": ["korean", "crypto", "kimchi-premium", "upbit", "bithumb", "fx-rate", "market-data", "asia", "arbitrage", "exchange-intelligence", "ai-analysis", "divergence", "coingecko"]
     }
@@ -1970,7 +2053,8 @@ async def symbols():
 @app.get("/api/v1/kimchi-premium")
 async def kimchi_premium(request: Request, symbol: str = Query(default="BTC", description="Crypto symbol (e.g., BTC, ETH, XRP)")):
     track_request("kimchi-premium")
-    log_event("api_call", endpoint="kimchi-premium", paid=True, price_usd=0.002, ip=get_real_ip(request))
+    if not getattr(request.state, "paid_log_via_wrapper", False):
+        log_event("api_call", endpoint="kimchi-premium", paid=True, price_usd=0.002, ip=get_real_ip(request))
     symbol = validate_symbol(symbol)
     try:
         upbit = await fetch_upbit_price(symbol)
@@ -2023,7 +2107,8 @@ async def kimchi_premium(request: Request, symbol: str = Query(default="BTC", de
 @app.get("/api/v1/stablecoin-premium")
 async def stablecoin_premium(request: Request):
     track_request("stablecoin-premium")
-    log_event("api_call", endpoint="stablecoin-premium", paid=True, price_usd=0.002, ip=get_real_ip(request))
+    if not getattr(request.state, "paid_log_via_wrapper", False):
+        log_event("api_call", endpoint="stablecoin-premium", paid=True, price_usd=0.002, ip=get_real_ip(request))
     try:
         fx = await fetch_fx_rate()
         official_rate = fx["rate"]
@@ -2068,42 +2153,8 @@ async def kr_prices(
     exchange: str = Query(default="all", description="Exchange: upbit, bithumb, or all")
 ):
     track_request("kr-prices")
-    log_event("api_call", endpoint="kr-prices", paid=True, price_usd=0.002, ip=get_real_ip(request))
-    symbol = validate_symbol(symbol)
-    exchange = exchange.lower().strip()
-    if exchange not in ("upbit", "bithumb", "all"):
-        raise HTTPException(status_code=400, detail=f"Unknown exchange: '{exchange}'. Use 'upbit', 'bithumb', or 'all'.")
-    results = {}
-    if exchange in ("upbit", "all"):
-        try:
-            results["upbit"] = await fetch_upbit_price(symbol)
-        except Exception as e:
-            results["upbit"] = {"error": f"Upbit request failed: {type(e).__name__}"}
-    if exchange in ("bithumb", "all"):
-        try:
-            results["bithumb"] = await fetch_bithumb_price(symbol)
-        except Exception as e:
-            results["bithumb"] = {"error": f"Bithumb request failed: {type(e).__name__}"}
-    if all("error" in v for v in results.values()):
-        stats["errors"] += 1
-    return {"symbol": symbol, "data": results, "timestamp": int(time.time() * 1000)}
-
-
-# === XRPL variant (Path C — kr-prices only, initial experiment) =============
-# Settle is handled by the x402-xrpl require_payment middleware registered
-# above; by the time this handler runs, RLUSD has already been received.
-# Logic is a minimal copy of kr_prices() rather than a direct call, so:
-#   - the api_call log carries endpoint="xrpl/kr-prices" (chain-separated
-#     revenue accounting in the daily report), not "kr-prices"
-#   - the original handler is not double-counted
-@app.get("/api/v1/xrpl/kr-prices")
-async def kr_prices_xrpl(
-    request: Request,
-    symbol: str = Query(default="BTC", description="Crypto symbol"),
-    exchange: str = Query(default="all", description="Exchange: upbit, bithumb, or all")
-):
-    track_request("xrpl/kr-prices")
-    log_event("api_call", endpoint="xrpl/kr-prices", paid=True, price_usd=0.002, ip=get_real_ip(request))
+    if not getattr(request.state, "paid_log_via_wrapper", False):
+        log_event("api_call", endpoint="kr-prices", paid=True, price_usd=0.002, ip=get_real_ip(request))
     symbol = validate_symbol(symbol)
     exchange = exchange.lower().strip()
     if exchange not in ("upbit", "bithumb", "all"):
@@ -2127,7 +2178,8 @@ async def kr_prices_xrpl(
 @app.get("/api/v1/fx-rate")
 async def fx_rate_endpoint(request: Request):
     track_request("fx-rate")
-    log_event("api_call", endpoint="fx-rate", paid=True, price_usd=0.001, ip=get_real_ip(request))
+    if not getattr(request.state, "paid_log_via_wrapper", False):
+        log_event("api_call", endpoint="fx-rate", paid=True, price_usd=0.001, ip=get_real_ip(request))
     try:
         return await fetch_fx_rate()
     except HTTPException:
@@ -2160,7 +2212,8 @@ async def kr_sentiment_endpoint(request: Request):
         # Claude 이상 감지 알림은 비결제 이벤트 — 플래그 off 시 tg_send 전달 안 함
         anomaly_sender = tg_send if ENABLE_REALTIME_NON_PAYMENT_ALERTS else None
         result = await handle_kr_sentiment(tg_send_func=anomaly_sender)
-        log_event("api_call", endpoint="kr-sentiment", paid=True, price_usd=0.05, ip=ip)
+        if not getattr(request.state, "paid_log_via_wrapper", False):
+            log_event("api_call", endpoint="kr-sentiment", paid=True, price_usd=0.05, ip=ip)
         # Note: 텔레그램 알림은 미들웨어(line ~655)에서 일괄 발송 — 중복 카운트 방지
         return result
     except Exception as e:
@@ -2412,7 +2465,8 @@ Respond ONLY with this JSON (no markdown, no backticks):
 async def arbitrage_scanner(request: Request):
     """Token-by-token Kimchi Premium, reverse premium, Upbit-Bithumb gap, market share"""
     track_request("/api/v1/arbitrage-scanner")
-    log_event("api_call", endpoint="arbitrage-scanner", paid=True, price_usd=0.01, ip=get_real_ip(request))
+    if not getattr(request.state, "paid_log_via_wrapper", False):
+        log_event("api_call", endpoint="arbitrage-scanner", paid=True, price_usd=0.01, ip=get_real_ip(request))
     ip = get_real_ip(request)
     data = compute_intel_data()
     if not data:
@@ -2433,7 +2487,8 @@ async def arbitrage_scanner(request: Request):
 async def exchange_alerts(request: Request):
     """Listing changes, caution/warning tokens"""
     track_request("/api/v1/exchange-alerts")
-    log_event("api_call", endpoint="exchange-alerts", paid=True, price_usd=0.01, ip=get_real_ip(request))
+    if not getattr(request.state, "paid_log_via_wrapper", False):
+        log_event("api_call", endpoint="exchange-alerts", paid=True, price_usd=0.01, ip=get_real_ip(request))
     ip = get_real_ip(request)
     data = compute_intel_data()
     if not data:
@@ -2450,7 +2505,8 @@ async def exchange_alerts(request: Request):
 async def market_movers(request: Request):
     """Volume spikes, price surges/crashes, top volume tokens"""
     track_request("/api/v1/market-movers")
-    log_event("api_call", endpoint="market-movers", paid=True, price_usd=0.01, ip=get_real_ip(request))
+    if not getattr(request.state, "paid_log_via_wrapper", False):
+        log_event("api_call", endpoint="market-movers", paid=True, price_usd=0.01, ip=get_real_ip(request))
     ip = get_real_ip(request)
     data = compute_intel_data()
     if not data:
@@ -2470,7 +2526,8 @@ async def market_read(request: Request):
     import time as _time
     start = _time.time()
     ip = get_real_ip(request)
-    log_event("api_call", endpoint="market-read", paid=True, price_usd=0.10, ip=ip)
+    if not getattr(request.state, "paid_log_via_wrapper", False):
+        log_event("api_call", endpoint="market-read", paid=True, price_usd=0.10, ip=ip)
 
     try:
         results = await asyncio.gather(
@@ -2936,8 +2993,14 @@ async def compute_divergence(symbol: str, depth: str) -> dict:
     return response
 
 
-async def _serve_divergence(symbol: str, depth_norm: str, endpoint_label: str, price_usd: float, ttl: int, ip: str = ""):
-    """Shared light/deep dispatcher with per-key cache + lock."""
+async def _serve_divergence(symbol: str, depth_norm: str, endpoint_label: str, price_usd: float, ttl: int, ip: str = "", request: Request | None = None):
+    """Shared light/deep dispatcher with per-key cache + lock.
+
+    `request` (optional) — when the caller is an XRPL wrapper it will have
+    set `request.state.paid_log_via_wrapper = True`, in which case the
+    dispatcher's own log_event is suppressed and the wrapper's XRPL-labelled
+    log_event is the sole api_call entry."""
+    _skip_log = bool(request is not None and getattr(request.state, "paid_log_via_wrapper", False))
     sym = validate_symbol(symbol)
     if sym not in COINGECKO_ID_MAP:
         raise HTTPException(
@@ -2953,7 +3016,8 @@ async def _serve_divergence(symbol: str, depth_norm: str, endpoint_label: str, p
     if cached_entry and now < cached_entry[1]:
         data = dict(cached_entry[0])
         data["data_age_seconds"] = int(now - (cached_entry[1] - ttl))
-        log_event("api_call", endpoint=endpoint_label, paid=True, price_usd=price_usd, ip=ip)
+        if not _skip_log:
+            log_event("api_call", endpoint=endpoint_label, paid=True, price_usd=price_usd, ip=ip)
         return data
 
     # Slow path with per-key lock
@@ -2964,7 +3028,8 @@ async def _serve_divergence(symbol: str, depth_norm: str, endpoint_label: str, p
         if cached_entry and now < cached_entry[1]:
             data = dict(cached_entry[0])
             data["data_age_seconds"] = int(now - (cached_entry[1] - ttl))
-            log_event("api_call", endpoint=endpoint_label, paid=True, price_usd=price_usd, ip=ip)
+            if not _skip_log:
+                log_event("api_call", endpoint=endpoint_label, paid=True, price_usd=price_usd, ip=ip)
             return data
 
         try:
@@ -2979,7 +3044,8 @@ async def _serve_divergence(symbol: str, depth_norm: str, endpoint_label: str, p
             raise HTTPException(status_code=503, detail=f"Divergence computation failed: {str(e)[:100]}")
 
         _divergence_cache[cache_key] = (result, time.time() + ttl)
-        log_event("api_call", endpoint=endpoint_label, paid=True, price_usd=price_usd, ip=ip)
+        if not _skip_log:
+            log_event("api_call", endpoint=endpoint_label, paid=True, price_usd=price_usd, ip=ip)
         return result
 
 
@@ -2990,7 +3056,7 @@ async def global_vs_korea_divergence(
 ):
     """Light tier — divergence + 1-2 sentence AI summary. $0.05."""
     track_request("/api/v1/global-vs-korea-divergence")
-    return await _serve_divergence(symbol, "light", "global-vs-korea-divergence", 0.05, DIVERGENCE_LIGHT_TTL, get_real_ip(request))
+    return await _serve_divergence(symbol, "light", "global-vs-korea-divergence", 0.05, DIVERGENCE_LIGHT_TTL, get_real_ip(request), request=request)
 
 
 @app.get("/api/v1/global-vs-korea-divergence-deep")
@@ -3000,7 +3066,7 @@ async def global_vs_korea_divergence_deep(
 ):
     """Deep tier — light data + Korean news signal + structured AI analysis. $0.10."""
     track_request("/api/v1/global-vs-korea-divergence-deep")
-    return await _serve_divergence(symbol, "deep", "global-vs-korea-divergence-deep", 0.10, DIVERGENCE_DEEP_TTL, get_real_ip(request))
+    return await _serve_divergence(symbol, "deep", "global-vs-korea-divergence-deep", 0.10, DIVERGENCE_DEEP_TTL, get_real_ip(request), request=request)
 
 
 # ============================================================
@@ -3009,15 +3075,21 @@ async def global_vs_korea_divergence_deep(
 KR_NEWS_TIMEOUT = 45  # 5-min cache hit < 1s; cold call 13~40s (Sonnet variable); cap below typical client SLA
 
 
-async def _serve_kr_news(category: str, premium: bool, limit: int, ip: str, endpoint_label: str, price_usd: float):
+async def _serve_kr_news(category: str, premium: bool, limit: int, ip: str, endpoint_label: str, price_usd: float, request: Request | None = None):
     """Shared dispatcher for the 4 kr-news endpoints. Wraps fetch_kr_news with a
-    timeout so a cold call that exceeds the budget returns 503 instead of hanging."""
+    timeout so a cold call that exceeds the budget returns 503 instead of hanging.
+
+    `request` (optional) — XRPL wrapper sets request.state.paid_log_via_wrapper
+    to True; when so, the dispatcher skips its own log_event so the wrapper's
+    xrpl-labelled api_call is the single stats.jsonl entry."""
+    _skip_log = bool(request is not None and getattr(request.state, "paid_log_via_wrapper", False))
     try:
         result = await asyncio.wait_for(
             fetch_kr_news(category=category, premium=premium, limit=limit),
             timeout=KR_NEWS_TIMEOUT,
         )
-        log_event("api_call", endpoint=endpoint_label, paid=True, price_usd=price_usd, ip=ip)
+        if not _skip_log:
+            log_event("api_call", endpoint=endpoint_label, paid=True, price_usd=price_usd, ip=ip)
         if not result.get("ok") and result.get("error"):
             # Naver/Claude returned no usable data — surface as 503 with retry hint
             return JSONResponse(
@@ -3052,7 +3124,7 @@ async def kr_news_kpop(
 ):
     """Korean K-pop news (Naver) → English translation + AI relevance classification. $0.01."""
     track_request("/api/v1/kr-news/kpop")
-    return await _serve_kr_news("kpop", False, limit, get_real_ip(request), "kr-news/kpop", 0.01)
+    return await _serve_kr_news("kpop", False, limit, get_real_ip(request), "kr-news/kpop", 0.01, request=request)
 
 
 @app.get("/api/v1/kr-news/kpop-summary")
@@ -3062,7 +3134,7 @@ async def kr_news_kpop_summary(
 ):
     """Korean K-pop news + AI synthesis (sentiment, key themes, trending artists). $0.05."""
     track_request("/api/v1/kr-news/kpop-summary")
-    return await _serve_kr_news("kpop", True, limit, get_real_ip(request), "kr-news/kpop-summary", 0.05)
+    return await _serve_kr_news("kpop", True, limit, get_real_ip(request), "kr-news/kpop-summary", 0.05, request=request)
 
 
 @app.get("/api/v1/kr-news/semiconductor")
@@ -3072,7 +3144,7 @@ async def kr_news_semiconductor(
 ):
     """Korean semiconductor industry news (Naver) → English translation. Samsung/SK Hynix/HBM. $0.02."""
     track_request("/api/v1/kr-news/semiconductor")
-    return await _serve_kr_news("semiconductor", False, limit, get_real_ip(request), "kr-news/semiconductor", 0.02)
+    return await _serve_kr_news("semiconductor", False, limit, get_real_ip(request), "kr-news/semiconductor", 0.02, request=request)
 
 
 @app.get("/api/v1/kr-news/semiconductor-summary")
@@ -3082,4 +3154,146 @@ async def kr_news_semiconductor_summary(
 ):
     """Korean semiconductor news + AI market synthesis (sentiment, themes, market_signal). $0.10."""
     track_request("/api/v1/kr-news/semiconductor-summary")
-    return await _serve_kr_news("semiconductor", True, limit, get_real_ip(request), "kr-news/semiconductor-summary", 0.10)
+    return await _serve_kr_news("semiconductor", True, limit, get_real_ip(request), "kr-news/semiconductor-summary", 0.10, request=request)
+
+
+# =============================================================================
+# XRPL variants (Path C — 15 routes)
+# =============================================================================
+# Settle is handled by x402-xrpl require_payment middleware (registered above
+# in 6 price buckets). By the time these wrappers run, RLUSD has already been
+# received by the merchant XRPL wallet.
+#
+# Each wrapper:
+#   1. Sets request.state.paid_log_via_wrapper = True — signals the original
+#      handler / shared dispatcher (via Option C guard) to skip its own
+#      log_event so we don't double-count.
+#   2. Emits its own log_event with endpoint="xrpl/<name>" — chain-separated
+#      revenue accounting in the daily report (stats.jsonl `api_call`).
+#   3. Delegates to the existing production handler / shared dispatcher, which
+#      does the actual work (identical business logic, identical response).
+#
+# XRPL settle is picked up by rate_limit_middleware's PAYMENT-RESPONSE decoder
+# → tg_notify_request (payment_settled event, endpoint "xrpl/<name>") → the
+# _create_receipt currency dispatch chooses RLUSD (main.py:1653+).
+
+def _mark_xrpl(request: Request, endpoint_label: str, price_usd: float, ip: str) -> None:
+    """Signal + log for XRPL wrappers. One-liner shared by all 15 wrappers."""
+    request.state.paid_log_via_wrapper = True
+    track_request(endpoint_label)
+    log_event("api_call", endpoint=endpoint_label, paid=True, price_usd=price_usd, ip=ip)
+
+
+@app.get("/api/v1/xrpl/kimchi-premium")
+async def kimchi_premium_xrpl(
+    request: Request,
+    symbol: str = Query(default="BTC", description="Crypto symbol (e.g., BTC, ETH, XRP)"),
+):
+    _mark_xrpl(request, "xrpl/kimchi-premium", 0.002, get_real_ip(request))
+    return await kimchi_premium(request, symbol)
+
+
+@app.get("/api/v1/xrpl/kr-prices")
+async def kr_prices_xrpl(
+    request: Request,
+    symbol: str = Query(default="BTC", description="Crypto symbol"),
+    exchange: str = Query(default="all", description="Exchange: upbit, bithumb, or all"),
+):
+    _mark_xrpl(request, "xrpl/kr-prices", 0.002, get_real_ip(request))
+    return await kr_prices(request, symbol, exchange)
+
+
+@app.get("/api/v1/xrpl/fx-rate")
+async def fx_rate_xrpl(request: Request):
+    _mark_xrpl(request, "xrpl/fx-rate", 0.001, get_real_ip(request))
+    return await fx_rate_endpoint(request)
+
+
+@app.get("/api/v1/xrpl/stablecoin-premium")
+async def stablecoin_premium_xrpl(request: Request):
+    _mark_xrpl(request, "xrpl/stablecoin-premium", 0.002, get_real_ip(request))
+    return await stablecoin_premium(request)
+
+
+@app.get("/api/v1/xrpl/arbitrage-scanner")
+async def arbitrage_scanner_xrpl(request: Request):
+    _mark_xrpl(request, "xrpl/arbitrage-scanner", 0.01, get_real_ip(request))
+    return await arbitrage_scanner(request)
+
+
+@app.get("/api/v1/xrpl/exchange-alerts")
+async def exchange_alerts_xrpl(request: Request):
+    _mark_xrpl(request, "xrpl/exchange-alerts", 0.01, get_real_ip(request))
+    return await exchange_alerts(request)
+
+
+@app.get("/api/v1/xrpl/market-movers")
+async def market_movers_xrpl(request: Request):
+    _mark_xrpl(request, "xrpl/market-movers", 0.01, get_real_ip(request))
+    return await market_movers(request)
+
+
+@app.get("/api/v1/xrpl/market-read")
+async def market_read_xrpl(request: Request):
+    _mark_xrpl(request, "xrpl/market-read", 0.10, get_real_ip(request))
+    return await market_read(request)
+
+
+@app.get("/api/v1/xrpl/kr-sentiment")
+async def kr_sentiment_xrpl(request: Request):
+    _mark_xrpl(request, "xrpl/kr-sentiment", 0.05, get_real_ip(request))
+    return await kr_sentiment_endpoint(request)
+
+
+@app.get("/api/v1/xrpl/global-vs-korea-divergence")
+async def global_vs_korea_divergence_xrpl(
+    request: Request,
+    symbol: str = Query(default="BTC", description="Crypto symbol (e.g., BTC, ETH, XRP)"),
+):
+    _mark_xrpl(request, "xrpl/global-vs-korea-divergence", 0.05, get_real_ip(request))
+    return await global_vs_korea_divergence(request, symbol)
+
+
+@app.get("/api/v1/xrpl/global-vs-korea-divergence-deep")
+async def global_vs_korea_divergence_deep_xrpl(
+    request: Request,
+    symbol: str = Query(default="BTC", description="Crypto symbol (e.g., BTC, ETH, XRP)"),
+):
+    _mark_xrpl(request, "xrpl/global-vs-korea-divergence-deep", 0.10, get_real_ip(request))
+    return await global_vs_korea_divergence_deep(request, symbol)
+
+
+@app.get("/api/v1/xrpl/kr-news/kpop")
+async def kr_news_kpop_xrpl(
+    request: Request,
+    limit: int = Query(default=5, ge=1, le=10, description="Number of articles to return (1-10)"),
+):
+    _mark_xrpl(request, "xrpl/kr-news/kpop", 0.01, get_real_ip(request))
+    return await kr_news_kpop(request, limit)
+
+
+@app.get("/api/v1/xrpl/kr-news/kpop-summary")
+async def kr_news_kpop_summary_xrpl(
+    request: Request,
+    limit: int = Query(default=5, ge=1, le=10, description="Number of articles to analyze (1-10)"),
+):
+    _mark_xrpl(request, "xrpl/kr-news/kpop-summary", 0.05, get_real_ip(request))
+    return await kr_news_kpop_summary(request, limit)
+
+
+@app.get("/api/v1/xrpl/kr-news/semiconductor")
+async def kr_news_semiconductor_xrpl(
+    request: Request,
+    limit: int = Query(default=5, ge=1, le=10, description="Number of articles to return (1-10)"),
+):
+    _mark_xrpl(request, "xrpl/kr-news/semiconductor", 0.02, get_real_ip(request))
+    return await kr_news_semiconductor(request, limit)
+
+
+@app.get("/api/v1/xrpl/kr-news/semiconductor-summary")
+async def kr_news_semiconductor_summary_xrpl(
+    request: Request,
+    limit: int = Query(default=5, ge=1, le=10, description="Number of articles to analyze (1-10)"),
+):
+    _mark_xrpl(request, "xrpl/kr-news/semiconductor-summary", 0.10, get_real_ip(request))
+    return await kr_news_semiconductor_summary(request, limit)
