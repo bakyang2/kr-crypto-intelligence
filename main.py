@@ -658,6 +658,32 @@ async def daily_summary_task():
             f"에러: {stats.get('errors', 0)}건"
         )
 
+def _count_xrpl_paid_api_calls(start_ts: int, end_ts: int) -> int:
+    """Count api_call events with endpoint prefix 'xrpl/' in [start_ts, end_ts).
+    Used to exclude XRPL settlements from the CDP facilitator fee calculation —
+    XRPL settles via t54 facilitator, so CDP does not charge for those calls."""
+    import json as _json
+    from stats_logger import STATS_FILE
+    n = 0
+    try:
+        with open(STATS_FILE) as f:
+            for line in f:
+                try:
+                    e = _json.loads(line)
+                except Exception:
+                    continue
+                if (e.get("type") == "api_call"
+                    and e.get("paid")
+                    and start_ts <= e.get("ts", 0) < end_ts
+                    and str(e.get("endpoint", "")).startswith("xrpl/")):
+                    n += 1
+    except FileNotFoundError:
+        pass
+    except Exception as ex:
+        print(f"[CDP-XRPL-COUNT] read err: {ex}")
+    return n
+
+
 async def daily_report_task():
     """매일 KST 09:00 (UTC 00:00)에 전일(KST 00:00~24:00) 상세 리포트 전송.
     이것은 결제 이외 알림 중 유일하게 살아있는 것 — 플래그 영향 받지 않음."""
@@ -682,18 +708,24 @@ async def daily_report_task():
             s = aggregate_stats_range(yesterday_start, yesterday_end)
             date_str = yesterday_midnight_kst.strftime("%Y-%m-%d")
 
-            # === CDP facilitator fee (Base settle cost) ===
+            # === CDP facilitator fee (Base/Polygon/Solana settle cost) ===
             # Coinbase 정책: 월 1000건 무료 + 초과 $0.001/건. 어제가 무료 한도
             # 경계를 걸친 날일 수도 있어 [월초~어제끝] - [월초~어제시작] 델타로 계산.
+            # XRPL 결제는 t54 facilitator 사용 → CDP 수수료 부과 대상 아님 → 카운트에서 제외.
             month_start_kst = yesterday_midnight_kst.replace(day=1)
             month_start_ts = int(month_start_kst.timestamp())
             month_through_yesterday = aggregate_stats_range(month_start_ts, yesterday_end)
             month_before_yesterday = aggregate_stats_range(month_start_ts, yesterday_start)
-            cdp_at_end, cdp_used, cdp_remaining = calculate_cdp_cost(month_through_yesterday["paid_calls"])
-            cdp_before, _, _ = calculate_cdp_cost(month_before_yesterday["paid_calls"])
+            # Subtract XRPL api_call events — they don't go through CDP.
+            month_xrpl_through = _count_xrpl_paid_api_calls(month_start_ts, yesterday_end)
+            month_xrpl_before = _count_xrpl_paid_api_calls(month_start_ts, yesterday_start)
+            month_cdp_calls = max(0, month_through_yesterday["paid_calls"] - month_xrpl_through)
+            month_cdp_calls_before = max(0, month_before_yesterday["paid_calls"] - month_xrpl_before)
+            cdp_at_end, cdp_used, cdp_remaining = calculate_cdp_cost(month_cdp_calls)
+            cdp_before, _, _ = calculate_cdp_cost(month_cdp_calls_before)
             today_cdp_cost = max(0.0, cdp_at_end - cdp_before)
-            month_paid_calls = month_through_yesterday["paid_calls"]
-            month_cdp_excess = max(0, month_paid_calls - 1000)
+            month_paid_calls = month_through_yesterday["paid_calls"]  # kept for report totals
+            month_cdp_excess = max(0, month_cdp_calls - 1000)          # excess against CDP-eligible calls only
 
             profit = s["revenue_usd"] - s["claude_cost_usd"] - today_cdp_cost
 
@@ -724,6 +756,7 @@ async def daily_report_task():
             residential_users.sort(key=lambda x: -x[2])
             datacenter_users.sort(key=lambda x: -x[2])
 
+            xrpl_note = f" — XRPL {month_xrpl_through:,}건 제외" if month_xrpl_through > 0 else ""
             msg = (
                 f"📊 <b>일일 리포트</b> — {date_str}\n\n"
                 f"API 호출: {s['api_calls_total']}건 (HIT {s['cache_hits']}, MISS {s['api_calls_total'] - s['cache_hits']})\n"
@@ -733,7 +766,7 @@ async def daily_report_task():
                 f"CDP 수수료: ${today_cdp_cost:.4f}\n"
                 f"에러: {s['errors']}건\n\n"
                 f"💰 일 순이익: ${profit:.4f}\n"
-                f"📅 당월 CDP: {month_paid_calls:,}/1,000건 ({month_cdp_excess:,}건 초과, ${cdp_at_end:.4f})\n"
+                f"📅 당월 CDP: {month_cdp_calls:,}/1,000건 ({month_cdp_excess:,}건 초과, ${cdp_at_end:.4f}){xrpl_note}\n"
                 f"{'─' * 25}\n\n"
                 f"👥 <b>사용자 활동</b> (in-memory, {total_calls_user}건 / ${total_revenue_user:.4f})\n"
             )
