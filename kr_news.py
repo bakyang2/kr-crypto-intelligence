@@ -43,7 +43,7 @@ NAVER_URL = "https://openapi.naver.com/v1/search/news.json"
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
 SONNET_MODEL = "claude-sonnet-4-6"
 
-CACHE_TTL = 300  # 5 min
+CACHE_TTL = 900  # 15 min
 KST = timezone(timedelta(hours=9))
 
 # Module-level Anthropic client — thread-safe per Anthropic SDK contract.
