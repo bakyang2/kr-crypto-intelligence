@@ -1743,16 +1743,21 @@ async def rate_limit_middleware(request: Request, call_next):
                 except Exception:
                     data = None
                 if isinstance(data, dict):
-                    # Per-chain merchant address + currency. XRPL uses its
-                    # own payTo (r...) and RLUSD IOU; everything else
-                    # (Base/Polygon/Solana) keeps the historical WALLET_ADDRESS
-                    # + USDC mapping unchanged.
+                    # Per-chain merchant address + currency dispatch.
+                    #  - XRPL   → XRPL_MERCHANT_ADDR (r...) + RLUSD
+                    #  - Solana → SOLANA_WALLET (3Ywxk…)   + USDC
+                    #  - EVM (Base/Polygon) → WALLET_ADDRESS (0xcF92…) + USDC
+                    # network comes from PAYMENT-RESPONSE header (CAIP-2 full
+                    # form: "solana:...", "eip155:8453", "xrpl:0") — same
+                    # source that populates network_label in stats.jsonl.
                     _is_xrpl = endpoint.startswith("/api/v1/xrpl/")
-                    _merchant_for_receipt = (
-                        XRPL_MERCHANT_ADDR
-                        if _is_xrpl and XRPL_MERCHANT_ADDR
-                        else WALLET_ADDRESS
-                    )
+                    _net_str = str(network or "")
+                    if _is_xrpl and XRPL_MERCHANT_ADDR:
+                        _merchant_for_receipt = XRPL_MERCHANT_ADDR
+                    elif _net_str.startswith("solana:"):
+                        _merchant_for_receipt = SOLANA_WALLET
+                    else:
+                        _merchant_for_receipt = WALLET_ADDRESS
                     _currency_for_receipt = "RLUSD" if _is_xrpl else "USDC"
                     try:
                         data["receipt"] = _create_receipt(
