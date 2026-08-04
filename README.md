@@ -1,8 +1,13 @@
 # KR Crypto Intelligence API
 
-Korean crypto market data + AI analysis for AI agents. 15 paid endpoints (11 crypto + 4 Korean news), 180+ tokens, world's first Korean-to-English crypto sentiment API. Pay-per-use via x402 protocol on Base, Polygon, Solana, and XRPL. AWS Bedrock AgentCore-ready.
+Korean crypto market data + AI analysis for AI agents. 16 paid endpoints (11 crypto + 4 Korean news + 1 KRW macro), 180+ tokens, world's first Korean-to-English crypto sentiment API. Pay-per-use via x402 protocol on Base, Polygon, Solana, and XRPL. AWS Bedrock AgentCore-ready.
 
-## Endpoints (15 paid)
+## Endpoints (16 paid)
+
+### KRW Macro Signal (new)
+| Endpoint | Price | Description |
+|----------|-------|-------------|
+| `GET /api/v1/krw-macro-stress` | $0.05 | **KRW Macro Stress Score (0-100)** — combined signal from US 3Y treasury (FRED) + VIX + foreign ownership proxy (SK Hynix + Samsung mcap-weighted) + USD/KRW momentum + Korean semiconductor equity. Rolling 120d percentile over 2yr backfill. Returns score + regime (calm/neutral/caution/risk_off/crisis) + direction (krw_weakening/stable/strengthening) + per-component breakdown + AI factual note. 15-min cache. Positioning: KRW macro stress filter for trading bots (not kimchi-premium predictor). |
 
 ### Korean News → English (new)
 | Endpoint | Price | Description |
@@ -124,7 +129,7 @@ All paid endpoints are also available via `/api/v1/xrpl/<endpoint>` for XRPL/RLU
 KR Crypto Intelligence is x402-native and ready to be discovered by AWS Bedrock AgentCore Payments (launched May 7, 2026 by AWS + Coinbase + Stripe).
 
 Bedrock-powered agents can:
-- Discover all 11 endpoints via `.well-known/x402` and CDP MCP
+- Discover all 16 endpoints via `.well-known/x402` and CDP MCP
 - Pay autonomously with USDC on Base, Polygon, or Solana — or RLUSD on XRPL
 - Access without API keys, signups, or human approval
 
@@ -132,7 +137,7 @@ Bedrock-powered agents can:
 **MCP server**: `https://mcp.printmoneylab.com/mcp`  
 **OpenAPI spec**: `https://api.printmoneylab.com/openapi.json`
 
-No additional setup required. The service is indexed in CDP Bazaar across all 11 endpoints.
+No additional setup required. The service is indexed in CDP Bazaar across all 16 endpoints.
 
 ## MCP Server
 

@@ -496,6 +496,21 @@ async def get_kr_sentiment() -> dict:
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+async def get_krw_macro_stress() -> dict:
+    """KRW Macro Stress Score (0-100) — combined 5-component signal blending US 3Y treasury (FRED), VIX, foreign ownership proxy on SK Hynix + Samsung (mcap-weighted foreign %), USD/KRW momentum, and Korean semiconductor equity. Rolling 120d percentile over a 2-year backfill. Returns score, regime (calm/neutral/caution/risk_off/crisis), direction (krw_weakening/stable/strengthening), per-component breakdown with raw values and freshness, plus an AI-generated factual note (no trading advice). 15-min cache. Positioning: KRW macro stress filter for trading bots (not a kimchi-premium predictor — V0 validation showed corr=-0.049 with kimchi premium).
+
+    💰 Price: $0.05 USDC per call
+    💳 Payment: x402 micropayment on Base, Polygon, or Solana
+    🔧 Client: AgentCash, Pay.sh, or any x402 SDK
+    📖 Docs: https://api.printmoneylab.com/.well-known/x402
+
+    Returns: score, regime, direction, components{us_rate_stress, risk_sentiment, foreign_flow, fx_momentum, semiconductor} each with score+raw+freshness, ai_note, market_hours{krx, us}, as_of, method, degraded[].
+    """
+    _track("get_krw_macro_stress")
+    return await _call_paid_api("/api/v1/krw-macro-stress")
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 async def get_global_vs_korea_divergence(symbol: str = Field(default="BTC", description="Crypto symbol (e.g., BTC, ETH, XRP, SOL, ADA, DOGE, DOT, MATIC, LINK, AVAX, ATOM, UNI, LTC, NEAR, OP, ARB, APT, ALGO, FTM, SUI, TRX, BCH, ETC, HBAR, SHIB)")) -> dict:
     """Light tier — premium between CoinGecko global price and Upbit Korean price + 1-2 sentence AI interpretation. 25 supported symbols. 60s cache. Returns prices (global_usd, korea_krw, fx_rate), divergence (premium_pct, direction, magnitude), context_signals (investment_warning, volume_spike_24h), and ai_interpretation (1-2 sentence English summary).
 

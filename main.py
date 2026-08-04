@@ -37,6 +37,7 @@ from x402_xrpl.server import require_payment as _xrpl_require_payment
 from stats_logger import log_event, aggregate_stats, aggregate_stats_range, maybe_archive
 from kr_sentiment import handle_kr_sentiment, load_cache_from_disk as load_sentiment_cache
 from kr_news import fetch_kr_news
+from krw_macro import fetch_krw_macro_stress
 from merchant_ops import (
     create_receipt as _create_receipt,
     send_post_settle_alert as _send_post_settle_alert,
@@ -209,6 +210,7 @@ PAID_ENDPOINTS_LIST = [
     "/api/v1/kr-sentiment", "/api/v1/global-vs-korea-divergence", "/api/v1/global-vs-korea-divergence-deep",
     "/api/v1/kr-news/kpop", "/api/v1/kr-news/kpop-summary", "/api/v1/kr-news/semiconductor",
     "/api/v1/kr-news/semiconductor-summary",
+    "/api/v1/krw-macro-stress",
     # XRPL variants (Path C) — RLUSD via t54 mainnet facilitator
     "/api/v1/xrpl/kimchi-premium", "/api/v1/xrpl/kr-prices", "/api/v1/xrpl/fx-rate", "/api/v1/xrpl/stablecoin-premium",
     "/api/v1/xrpl/market-read", "/api/v1/xrpl/arbitrage-scanner", "/api/v1/xrpl/exchange-alerts",
@@ -216,6 +218,7 @@ PAID_ENDPOINTS_LIST = [
     "/api/v1/xrpl/global-vs-korea-divergence-deep", "/api/v1/xrpl/kr-news/kpop",
     "/api/v1/xrpl/kr-news/kpop-summary", "/api/v1/xrpl/kr-news/semiconductor",
     "/api/v1/xrpl/kr-news/semiconductor-summary",
+    "/api/v1/xrpl/krw-macro-stress",
 ]
 
 
@@ -265,6 +268,7 @@ async def tg_notify_request(endpoint, symbol, ip, status_code=200, network=None,
         "/api/v1/kr-news/kpop-summary": "$0.05",
         "/api/v1/kr-news/semiconductor": "$0.02",
         "/api/v1/kr-news/semiconductor-summary": "$0.10",
+        "/api/v1/krw-macro-stress": "$0.05",
         # XRPL variants — 1:1 mirror of EVM prices
         "/api/v1/xrpl/kimchi-premium": "$0.002",
         "/api/v1/xrpl/kr-prices": "$0.002",
@@ -280,6 +284,7 @@ async def tg_notify_request(endpoint, symbol, ip, status_code=200, network=None,
         "/api/v1/xrpl/global-vs-korea-divergence-deep": "$0.10",
         "/api/v1/xrpl/market-read": "$0.10",
         "/api/v1/xrpl/kr-news/semiconductor-summary": "$0.10",
+        "/api/v1/xrpl/krw-macro-stress": "$0.05",
         # fx-rate XRPL variant falls through to default "$0.001" like EVM fx-rate
     }
     price = price_map.get(endpoint, "$0.001")  # fx-rate falls through here at $0.001
@@ -869,7 +874,7 @@ XRPL_PRICE_GROUPS = {
               "/api/v1/xrpl/market-movers", "/api/v1/xrpl/kr-news/kpop"],
     "0.02":  ["/api/v1/xrpl/kr-news/semiconductor"],
     "0.05":  ["/api/v1/xrpl/kr-sentiment", "/api/v1/xrpl/global-vs-korea-divergence",
-              "/api/v1/xrpl/kr-news/kpop-summary"],
+              "/api/v1/xrpl/kr-news/kpop-summary", "/api/v1/xrpl/krw-macro-stress"],
     "0.10":  ["/api/v1/xrpl/global-vs-korea-divergence-deep", "/api/v1/xrpl/market-read",
               "/api/v1/xrpl/kr-news/semiconductor-summary"],
 }
@@ -919,6 +924,8 @@ _CATALOG_PER_ENDPOINT = {
     "/api/v1/kr-news/kpop-summary": {"data_sources": ["naver-news", "claude-haiku"], "update_frequency": "5-min", "category": "korean-news-analysis"},
     "/api/v1/kr-news/semiconductor": {"data_sources": ["naver-news", "claude-haiku"], "update_frequency": "5-min", "category": "korean-news"},
     "/api/v1/kr-news/semiconductor-summary": {"data_sources": ["naver-news", "claude-haiku"], "update_frequency": "5-min", "category": "korean-news-analysis"},
+    "/api/v1/krw-macro-stress": {"data_sources": ["fred", "yfinance", "naver-finance", "claude-haiku"], "update_frequency": "15-min", "category": "korean-macro-signal", "locale": "ko-KR", "jurisdiction": "KR"},
+    "/api/v1/xrpl/krw-macro-stress": {"data_sources": ["fred", "yfinance", "naver-finance", "claude-haiku"], "update_frequency": "15-min", "category": "korean-macro-signal", "locale": "ko-KR", "jurisdiction": "KR"},
 }
 
 
@@ -1120,6 +1127,32 @@ x402_routes = {
                     "sources": ["Upbit API (189 tokens, real-time)", "Bithumb API (real-time)", "Binance API (reference)", "Coinness Telegram (20 articles analyzed, 8 Korean-related)"],
                     "timestamp": "2026-04-23T12:00:00Z",
                     "_meta": {"cache_age_seconds": 0, "computed_at": "2026-04-23T12:00:00Z", "data_sources_status": {"exchange_intel": "ok", "coinness": "ok"}},
+                }
+            ),
+        ),
+    ),
+    "GET /api/v1/krw-macro-stress": RouteConfig(
+        accepts=_pay_opts("$0.05"),
+        description="KRW Macro Stress Score (0-100) — combined signal from US 3Y treasury, VIX, foreign ownership proxy (SK Hynix + Samsung, mcap-weighted), USD/KRW momentum, and Korean semiconductor equity. Rolling 120d percentile over 2yr backfill. Regime + direction + per-component breakdown. Positioning: KRW macro stress, not kimchi-premium prediction.",
+        mime_type="application/json",
+        extensions=declare_discovery_extension(
+            output=OutputConfig(
+                example={
+                    "score": 45.4,
+                    "regime": "caution",
+                    "direction": "krw_stable",
+                    "components": {
+                        "us_rate_stress": {"score": 94.17, "raw": {"us_3y_yield_pct": 4.34}, "freshness": "0d"},
+                        "risk_sentiment": {"score": 6.67, "raw": {"vix": 15.86}, "freshness": "0d"},
+                        "foreign_flow": {"score": 28.33, "raw": {"mcap_weighted_foreign_pct": 48.576, "delta_5d_pp": 0.045, "note": "(proxy: SK Hynix + Samsung mcap-weighted foreign ownership %; not direct netbuy amount)"}, "freshness": "0d"},
+                        "fx_momentum": {"score": 2.5, "raw": {"usdkrw": 1425.48, "pct_change_5d": -2.66}, "freshness": "0d"},
+                        "semiconductor": {"score": 48.33, "raw": {"sk_hynix_krw": 1535000.0, "samsung_krw": 235250.0}, "freshness": "0d"},
+                    },
+                    "ai_note": "Score 45 sits in the caution band. VIX percentile is low while US 3Y sits near a 120d high; foreign ownership drift is muted.",
+                    "market_hours": {"krx": "closed", "us": "closed"},
+                    "as_of": "2026-08-04T02:37:05Z",
+                    "method": "rolling percentile 120d, weights 25/25/20/20/10",
+                    "degraded": [],
                 }
             ),
         ),
@@ -1404,6 +1437,7 @@ PAID_ENDPOINTS_PRICING = {
     "/api/v1/global-vs-korea-divergence-deep": "0.100000",
     "/api/v1/market-read": "0.100000",
     "/api/v1/kr-news/semiconductor-summary": "0.100000",
+    "/api/v1/krw-macro-stress": "0.050000",
     # XRPL variants — 6-decimal string mirror of EVM PAID_ENDPOINTS_PRICING
     "/api/v1/xrpl/kimchi-premium": "0.002000",
     "/api/v1/xrpl/kr-prices": "0.002000",
@@ -1420,6 +1454,7 @@ PAID_ENDPOINTS_PRICING = {
     "/api/v1/xrpl/global-vs-korea-divergence-deep": "0.100000",
     "/api/v1/xrpl/market-read": "0.100000",
     "/api/v1/xrpl/kr-news/semiconductor-summary": "0.100000",
+    "/api/v1/xrpl/krw-macro-stress": "0.050000",
 }
 
 FREE_ENDPOINTS = [
@@ -1869,6 +1904,7 @@ async def x402_manifest():
             {"path": "/api/v1/kr-news/kpop-summary", "method": "GET", "price": "$0.05", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean K-pop news + AI synthesis (sentiment, key themes, trending entities). Sonnet 4.6 paragraph summary."},
             {"path": "/api/v1/kr-news/semiconductor", "method": "GET", "price": "$0.02", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean semiconductor industry news (Samsung/SK Hynix/HBM/foundry) translated to English with AI relevance classification."},
             {"path": "/api/v1/kr-news/semiconductor-summary", "method": "GET", "price": "$0.10", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "Korean semiconductor news + AI market synthesis with market_signal (bullish/bearish/neutral). Sonnet 4.6."},
+            {"path": "/api/v1/krw-macro-stress", "method": "GET", "price": "$0.05", "networks": ["eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"], "description": "KRW Macro Stress Score (0-100) — combined signal: US 3Y treasury + VIX + foreign ownership proxy + USD/KRW momentum + Korean semiconductor equity. Rolling 120d percentile."},
             {"path": "/api/v1/xrpl/kimchi-premium", "method": "GET", "price": "$0.002", "networks": ["xrpl:0"], "description": "Real-time Kimchi Premium — XRPL/RLUSD"},
             {"path": "/api/v1/xrpl/kr-prices", "method": "GET", "price": "$0.002", "networks": ["xrpl:0"], "description": "Korean exchange prices (Upbit, Bithumb) — XRPL/RLUSD"},
             {"path": "/api/v1/xrpl/fx-rate", "method": "GET", "price": "$0.001", "networks": ["xrpl:0"], "description": "USD/KRW exchange rate — XRPL/RLUSD"},
@@ -1883,7 +1919,8 @@ async def x402_manifest():
             {"path": "/api/v1/xrpl/kr-news/kpop", "method": "GET", "price": "$0.01", "networks": ["xrpl:0"], "description": "Korean K-pop news translated to English — XRPL/RLUSD"},
             {"path": "/api/v1/xrpl/kr-news/kpop-summary", "method": "GET", "price": "$0.05", "networks": ["xrpl:0"], "description": "Korean K-pop news + AI synthesis — XRPL/RLUSD"},
             {"path": "/api/v1/xrpl/kr-news/semiconductor", "method": "GET", "price": "$0.02", "networks": ["xrpl:0"], "description": "Korean semiconductor industry news — XRPL/RLUSD"},
-            {"path": "/api/v1/xrpl/kr-news/semiconductor-summary", "method": "GET", "price": "$0.10", "networks": ["xrpl:0"], "description": "Korean semiconductor news + AI market synthesis — XRPL/RLUSD"}
+            {"path": "/api/v1/xrpl/kr-news/semiconductor-summary", "method": "GET", "price": "$0.10", "networks": ["xrpl:0"], "description": "Korean semiconductor news + AI market synthesis — XRPL/RLUSD"},
+            {"path": "/api/v1/xrpl/krw-macro-stress", "method": "GET", "price": "$0.05", "networks": ["xrpl:0"], "description": "KRW Macro Stress Score (0-100) — XRPL/RLUSD"}
         ],
         "free_endpoints": [
             {"path": "/api/v1/symbols", "method": "GET", "description": "Available trading symbols"},
@@ -1979,6 +2016,18 @@ predicts global crypto returns.
   World's first Korean-to-English crypto sentiment. Combines 189+ tokens
   exchange intelligence with Korean news context for AI-powered insights.
   1-hour cache.
+
+### KRW Macro Signal
+- GET /api/v1/krw-macro-stress -> $0.05
+  KRW Macro Stress Score (0-100). Combined 5-component signal:
+  US 3Y treasury (FRED), VIX, foreign ownership proxy on SK Hynix +
+  Samsung (mcap-weighted %), USD/KRW momentum, Korean semiconductor
+  equity. Rolling 120d percentile over 2yr backfill.
+  Returns score + regime (calm/neutral/caution/risk_off/crisis) +
+  direction (krw_weakening/stable/strengthening) + per-component
+  breakdown + AI-generated factual note (no trading advice).
+  15-min cache. Positioning: KRW macro stress signal for trading bots
+  filtering entry/exit on macro regime (not a kimchi-premium predictor).
 
 ### AI Analysis
 - GET /api/v1/market-read -> $0.10
@@ -2265,6 +2314,23 @@ async def kr_sentiment_endpoint(request: Request):
         stats["errors"] += 1
         log_event("error", endpoint="kr-sentiment", error=str(e)[:200])
         raise HTTPException(status_code=503, detail=f"Sentiment analysis failed: {str(e)[:100]}")
+
+
+# === krw-macro-stress endpoint ===
+@app.get("/api/v1/krw-macro-stress")
+async def krw_macro_stress_endpoint(request: Request):
+    """KRW Macro Stress Score — combined 5-component signal (0-100)."""
+    track_request("/api/v1/krw-macro-stress")
+    ip = get_real_ip(request)
+    try:
+        result = await fetch_krw_macro_stress()
+        if not getattr(request.state, "paid_log_via_wrapper", False):
+            log_event("api_call", endpoint="krw-macro-stress", paid=True, price_usd=0.05, ip=ip)
+        return result
+    except Exception as e:
+        stats["errors"] += 1
+        log_event("error", endpoint="krw-macro-stress", error=str(e)[:200])
+        raise HTTPException(status_code=503, detail=f"KRW macro stress failed: {str(e)[:100]}")
 
 
 if __name__ == "__main__":
@@ -3288,6 +3354,12 @@ async def market_read_xrpl(request: Request):
 async def kr_sentiment_xrpl(request: Request):
     _mark_xrpl(request, "xrpl/kr-sentiment", 0.05, get_real_ip(request))
     return await kr_sentiment_endpoint(request)
+
+
+@app.get("/api/v1/xrpl/krw-macro-stress")
+async def krw_macro_stress_xrpl(request: Request):
+    _mark_xrpl(request, "xrpl/krw-macro-stress", 0.05, get_real_ip(request))
+    return await krw_macro_stress_endpoint(request)
 
 
 @app.get("/api/v1/xrpl/global-vs-korea-divergence")

@@ -25,3 +25,5 @@ logs/
 var/
 wallet_balance_cache.json
 data/*_new_entities.json
+krw_macro_cache.json
+requirements.snapshot.*.txt

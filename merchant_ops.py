@@ -92,6 +92,7 @@ ENDPOINT_PRICES = {
     "/api/v1/kr-news/kpop-summary": "0.05",
     "/api/v1/kr-news/semiconductor": "0.02",
     "/api/v1/kr-news/semiconductor-summary": "0.10",
+    "/api/v1/krw-macro-stress": "0.05",
     # XRPL variants — 1:1 price mirror. Currency is dispatched at receipt-
     # sign time (main.py caller passes currency="RLUSD"); only the numeric
     # amount is looked up here.
@@ -110,6 +111,7 @@ ENDPOINT_PRICES = {
     "/api/v1/xrpl/global-vs-korea-divergence-deep": "0.10",
     "/api/v1/xrpl/market-read": "0.10",
     "/api/v1/xrpl/kr-news/semiconductor-summary": "0.10",
+    "/api/v1/xrpl/krw-macro-stress": "0.05",
 }
 
 
